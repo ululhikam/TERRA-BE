@@ -1,0 +1,25 @@
+{
+  "name": "terra-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Decoupled Express.js REST API for Modular Event Management & Ticket Marketplace",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test tests/api.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "zod": "^3.24.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
