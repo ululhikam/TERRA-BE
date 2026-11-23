@@ -4,8 +4,8 @@ import { AppError } from '../utils/response.js'
 import {
   attachTicketQr,
   createQrDownloadToken,
-  generateTicketQrBuffer,
-  generateTicketQrDataUrl,
+  generateBrandedQrBuffer,
+  generateBrandedQrDataUrl,
   generateTicketQrSvg,
   verifyQrDownloadToken
 } from '../utils/qrcode.js'
@@ -45,7 +45,7 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   })
 
   const evt = await db.getEventOrThrow(event_id)
-  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t)))
+  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t, evt)))
 
   let emailStatus = {
     sent: false,
@@ -61,6 +61,7 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
       eventTitle: evt?.title || 'TERRA Event',
       eventDate: evt?.start_at || evt?.start_date || '-',
       location: evt?.location_name || evt?.venue_name || '-',
+      event: evt,
       orderId: result.order?.id,
       orderNumber: result.order?.order_number,
       tickets: ticketsWithQr
@@ -78,7 +79,7 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
 export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
   const result = await db.verifyOrderPayment(eventId, orderId, operatorUser)
   const evt = await db.getEventOrThrow(eventId)
-  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t)))
+  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t, evt)))
 
   const recipientEmail = result.participant?.email || operatorUser?.email
   const customerName = result.participant?.full_name || 'Peserta TERRA'
@@ -88,8 +89,9 @@ export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
       to: recipientEmail,
       customerName,
       eventTitle: evt?.title || 'TERRA Event',
-      eventDate: evt?.start_at || '-',
-      location: evt?.location_name || '-',
+      eventDate: evt?.start_at || evt?.start_date || '-',
+      location: evt?.location_name || evt?.venue_name || '-',
+      event: evt,
       orderId: result.order?.id,
       orderNumber: result.order?.order_number,
       tickets: ticketsWithQr
@@ -103,15 +105,25 @@ export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
   }
 }
 
+async function loadEventMapForTickets(tickets = []) {
+  const eventIds = [...new Set(tickets.map((t) => t?.event_id).filter(Boolean))]
+  const entries = await Promise.all(
+    eventIds.map(async (id) => [id, await db.getEventOrThrow(id).catch(() => null)])
+  )
+  return new Map(entries)
+}
+
 export async function listOrderTicketsWithQr(orderId, user = null) {
   if (user) await assertOrderAccessById(orderId, user)
   const tickets = await db.listTicketsByOrder(orderId)
-  return Promise.all(tickets.map((t) => attachTicketQr(t)))
+  const eventMap = await loadEventMapForTickets(tickets)
+  return Promise.all(tickets.map((t) => attachTicketQr(t, eventMap.get(t.event_id) || null)))
 }
 
 export async function listMyTicketsWithQr(userId) {
   const tickets = await db.listTicketsByCustomer(userId)
-  return Promise.all(tickets.map((t) => attachTicketQr(t)))
+  const eventMap = await loadEventMapForTickets(tickets)
+  return Promise.all(tickets.map((t) => attachTicketQr(t, eventMap.get(t.event_id) || null)))
 }
 
 async function resolveTicketWithOwnerAccess(ticketId, user) {
@@ -128,13 +140,15 @@ async function resolveTicketWithOwnerAccess(ticketId, user) {
 
 export async function findTicketWithQr(ticketId, user = null) {
   const tk = await resolveTicketWithOwnerAccess(ticketId, user)
-  return attachTicketQr(tk)
+  const evt = tk.event_id ? await db.getEventOrThrow(tk.event_id).catch(() => null) : null
+  return attachTicketQr(tk, evt)
 }
 
 export async function getTicketQrAssets(ticketId, user = null) {
   const tk = await resolveTicketWithOwnerAccess(ticketId, user)
+  const evt = tk.event_id ? await db.getEventOrThrow(tk.event_id).catch(() => null) : null
   const [qr_data_url, qr_svg] = await Promise.all([
-    generateTicketQrDataUrl(tk.qr_payload),
+    generateBrandedQrDataUrl(tk.qr_payload, { width: 320, margin: 2, event: evt }),
     generateTicketQrSvg(tk.qr_payload)
   ])
   const token = createQrDownloadToken(tk.id)
@@ -163,7 +177,8 @@ export async function buildTicketQrImageDownload({ ticketId, token, user }) {
     })
   }
 
-  const buffer = await generateTicketQrBuffer(tk.qr_payload, { width: 320, margin: 2 })
+  const evt = tk.event_id ? await db.getEventOrThrow(tk.event_id).catch(() => null) : null
+  const buffer = await generateBrandedQrBuffer(tk.qr_payload, { width: 360, margin: 2, event: evt })
   return { buffer, filename: `qr-${tk.ticket_code}.png` }
 }
 

@@ -12,6 +12,8 @@ const { default: app } = await import('../src/app.js')
 const { store } = await import('../src/repositories/store.js')
 const { signOAuthToken } = await import('../src/config/passport.js')
 const { buildTicketQrEmailHtml, mapResendAttachments } = await import('../src/services/email.service.js')
+const { generateBrandedQrBuffer } = await import('../src/utils/qrcode.js')
+const { generateTicketsQrPdfBuffer } = await import('../src/services/pdf.service.js')
 
 let server
 let baseUrl
@@ -733,7 +735,8 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     assert.ok(previewRes.headers.get('content-security-policy')?.includes('frame-ancestors'))
     assert.ok(previewRes.data.includes('data:image/png;base64,'))
     assert.ok(previewRes.data.includes('/qr-image?token='))
-    assert.ok(previewRes.data.includes('Download Semua QR (PDF)'))
+    assert.ok(previewRes.data.includes('Download PDF E-Ticket'))
+    assert.ok(previewRes.data.includes('Download Semua E-Ticket (PDF)'))
 
     const pdfMatch = previewRes.data.match(/\/api\/v1(\/orders\/[^"']+qr-pdf\?token=[^"']+)/)
     assert.ok(pdfMatch)
@@ -871,6 +874,14 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     const cidHtml = buildTicketQrEmailHtml({
       customerName: 'Bestan',
       eventTitle: 'DEMAFEST 2026',
+      eventDate: '2026-08-29T10:00:00+07:00',
+      location: 'Kampus UST Yogyakarta',
+      event: {
+        title: 'DEMAFEST 2026',
+        theme_color: '#1e3a8a',
+        organization: { name: 'BEM UST Yogyakarta' }
+      },
+      eventLogoSrc: 'cid:event-logo-badge',
       orderNumber: 'ORD-01',
       tickets,
       qrImages,
@@ -878,6 +889,9 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       useCidImages: true
     })
     assert.ok(cidHtml.includes('src="cid:qr-1-tktsample1"'))
+    assert.ok(cidHtml.includes('src="cid:event-logo-badge"'))
+    assert.ok(cidHtml.includes('#1e3a8a'))
+    assert.ok(cidHtml.includes('BEM UST Yogyakarta'))
     assert.ok(!cidHtml.includes('data:image/png;base64,'))
     assert.ok(cidHtml.includes('/api/v1/tickets/tkt-sample-1/qr-image?token=123.abc'))
 
@@ -892,5 +906,41 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     })
     assert.ok(previewHtml.includes('src="data:image/png;base64,FAKE_BASE64"'))
     assert.ok(!previewHtml.includes('src="cid:'))
+  })
+
+  it('generates branded QR PNG buffer with event logo/monogram and redesigned boarding-pass PDF', async () => {
+    const sampleEvent = {
+      id: 'evt-demafest-test',
+      title: 'DEMAFEST 2026',
+      theme_color: '#1e3a8a',
+      location_name: 'Student Center UST',
+      start_at: '2026-08-29T09:00:00+07:00',
+      organization: { name: 'BEM UST Yogyakarta' }
+    }
+    const brandedQr = await generateBrandedQrBuffer('TERRA:DMF-001:evt-demafest-test', {
+      width: 360,
+      event: sampleEvent
+    })
+    assert.deepEqual([...brandedQr.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+
+    const pdfBuf = await generateTicketsQrPdfBuffer({
+      tickets: [
+        {
+          id: 'tkt-dmf-1',
+          event_id: sampleEvent.id,
+          event_title: sampleEvent.title,
+          ticket_type: 'VIP Pass',
+          participant_name: 'Bestan Dhya Ul Haq',
+          ticket_code: 'DMF-001',
+          order_number: 'ORD-DMF-1',
+          qr_payload: 'TERRA:DMF-001:evt-demafest-test',
+          status: 'Active'
+        }
+      ],
+      order: { id: 'ord-dmf-1', order_number: 'ORD-DMF-1' },
+      event: sampleEvent
+    })
+    assert.equal(pdfBuf.subarray(0, 5).toString('utf8'), '%PDF-')
+    assert.ok(pdfBuf.length > 5000)
   })
 })
