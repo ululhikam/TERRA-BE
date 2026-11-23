@@ -1,6 +1,7 @@
 import 'dotenv/config'
+import type { EnvConfig } from '../types/domain.js'
 
-function resolveAppBaseUrl() {
+function resolveAppBaseUrl(): string {
   const explicit = (process.env.APP_BASE_URL || '').trim()
   if (explicit) return explicit.replace(/\/+$/, '')
 
@@ -19,7 +20,7 @@ function resolveAppBaseUrl() {
   return `http://localhost:${process.env.PORT || 3000}`
 }
 
-export const env = {
+export const env: EnvConfig = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',

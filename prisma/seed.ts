@@ -10,7 +10,7 @@ async function main() {
   store.reset()
 
   for (const user of store.users) {
-    const delegate =
+    const delegate: any =
       user.role === 'admin'
         ? prisma.admin
         : user.role === 'organizer'

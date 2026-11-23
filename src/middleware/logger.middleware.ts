@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
+import type { Request, Response, NextFunction } from 'express'
 import { logger } from '../utils/logger.js'
 
-export function requestLogger(req, res, next) {
+export function requestLogger(req: Request, res: Response, next: NextFunction) {
   const requestId = req.headers['x-request-id'] || crypto.randomUUID()
   const startedAt = process.hrtime.bigint()
 

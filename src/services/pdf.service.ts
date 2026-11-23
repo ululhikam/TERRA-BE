@@ -30,7 +30,7 @@ function formatTicketDateTime(value) {
 /**
  * Generate a Neo-Brutalist boarding-pass PDF containing branded event-logo QR Code(s).
  */
-export async function generateTicketsQrPdfBuffer({ tickets, order = null, event = null }) {
+export async function generateTicketsQrPdfBuffer({ tickets, order = null, event = null }: any): Promise<Buffer> {
   const list = Array.isArray(tickets) ? tickets : [tickets].filter(Boolean)
   if (!list.length) {
     throw new Error('Tidak ada tiket untuk dicetak ke PDF QR.')

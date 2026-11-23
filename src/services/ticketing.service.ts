@@ -47,7 +47,7 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   const evt = await db.getEventOrThrow(event_id)
   const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t, evt)))
 
-  let emailStatus = {
+  let emailStatus: any = {
     sent: false,
     delivered_by_provider: false,
     mode: 'deferred-pending-payment',
@@ -105,12 +105,12 @@ export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
   }
 }
 
-async function loadEventMapForTickets(tickets = []) {
+async function loadEventMapForTickets(tickets: any[] = []) {
   const eventIds = [...new Set(tickets.map((t) => t?.event_id).filter(Boolean))]
   const entries = await Promise.all(
-    eventIds.map(async (id) => [id, await db.getEventOrThrow(id).catch(() => null)])
+    eventIds.map(async (id): Promise<[string, any]> => [id, await db.getEventOrThrow(id).catch(() => null)])
   )
-  return new Map(entries)
+  return new Map<string, any>(entries)
 }
 
 export async function listOrderTicketsWithQr(orderId, user = null) {

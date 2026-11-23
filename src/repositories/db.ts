@@ -39,7 +39,7 @@ function addDaysIso(dateStr, delta) {
 // =============================================================================
 // USERS (SEPARATED TABLES: CUSTOMERS, ORGANIZERS, ADMINS), AUTH & NOTIFICATIONS
 // =============================================================================
-function roleDelegate(role, client = prisma) {
+function roleDelegate(role: any, client: any = prisma): any {
   if (role === 'admin') return client.admin
   if (role === 'organizer') return client.organizer
   return client.customer
@@ -882,7 +882,7 @@ export async function getEventOrThrow(eventId) {
   }
 }
 
-export async function listEventsForUser(user, { organization_id, status } = {}) {
+export async function listEventsForUser(user: any, { organization_id, status }: any = {}) {
   if (!usePrisma()) {
     let list = store.events.filter((e) => !e.deleted_at)
     if (organization_id) list = list.filter((e) => e.organization_id === organization_id)
@@ -1746,13 +1746,13 @@ export async function listTicketTypes(eventId) {
   return prisma.ticketType.findMany({ where: { event_id: eventId } })
 }
 
-function pickTicketTypeFields(data = {}) {
+function pickTicketTypeFields(data: any = {}): Record<string, any> {
   const allowed = [
     'name', 'category', 'description', 'price', 'quantity', 'currency',
     'status', 'min_per_order', 'max_per_order', 'sale_start_at', 'sale_end_at',
     'benefits', 'terms'
   ]
-  const out = {}
+  const out: Record<string, any> = {}
   for (const key of allowed) {
     if (data[key] !== undefined) out[key] = data[key]
   }
@@ -2346,7 +2346,7 @@ export async function validateOrCheckIn(codeOrQr, station, operatorId, commitChe
   })
 }
 
-export async function listParticipants(eventId, { search, checked_in } = {}) {
+export async function listParticipants(eventId: string, { search, checked_in }: any = {}) {
   if (!usePrisma()) {
     let list = store.participants.filter((p) => p.event_id === eventId)
     if (checked_in === 'true') list = list.filter((p) => p.checked_in)
@@ -2559,8 +2559,8 @@ export async function createIncome(eventId, data, userId) {
   })
 }
 
-export async function updateIncome(id, patch) {
-  const clean = {}
+export async function updateIncome(id: string, patch: any) {
+  const clean: Record<string, any> = {}
   if (patch.category !== undefined) clean.category = patch.category
   if (patch.description !== undefined) clean.description = patch.description
   if (patch.amount !== undefined) clean.amount = Number(patch.amount)
@@ -2607,8 +2607,8 @@ export async function createExpense(eventId, data, userId) {
   })
 }
 
-export async function updateExpense(id, patch) {
-  const clean = {}
+export async function updateExpense(id: string, patch: any) {
+  const clean: Record<string, any> = {}
   if (patch.category !== undefined) clean.category = patch.category
   if (patch.description !== undefined) clean.description = patch.description
   if (patch.amount !== undefined) clean.amount = Number(patch.amount)
@@ -2895,13 +2895,13 @@ function filterAndSortMarketplaceItems(list, { price_type, sort }) {
   }
 
   if (sort === 'popular' || sort === 'most_registered') {
-    const soldOf = (e) => (e.ticket_types || []).reduce((s, t) => s + Number(t.sold_quantity || 0), 0)
-    return [...out].sort((a, b) => soldOf(b) - soldOf(a) || new Date(a.start_at) - new Date(b.start_at))
+    const soldOf = (e: any) => (e.ticket_types || []).reduce((s: number, t: any) => s + Number(t.sold_quantity || 0), 0)
+    return [...out].sort((a, b) => soldOf(b) - soldOf(a) || new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
   }
   if (sort === 'newest') {
-    return [...out].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    return [...out].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
   }
-  return [...out].sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
+  return [...out].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
 }
 
 export async function listMarketplaceEvents({
@@ -2916,7 +2916,7 @@ export async function listMarketplaceEvents({
   sort = 'upcoming',
   page = 1,
   limit = 12
-} = {}) {
+}: any = {}) {
   const p = Math.max(1, Number(page) || 1)
   const l = Math.min(50, Math.max(1, Number(limit) || 12))
 
@@ -3348,13 +3348,13 @@ export async function listAdminUsers() {
     prisma.admin.findMany({ orderBy: { created_at: 'desc' } })
   ])
   return [
-    ...customers.map((u) => sanitizeUser({ ...u, role: 'customer' })),
-    ...organizers.map((u) => {
+    ...customers.map((u: any) => sanitizeUser({ ...u, role: 'customer' })),
+    ...organizers.map((u: any) => {
       const orgUser = { ...u, role: 'organizer' }
       return { ...sanitizeUser(orgUser), subscription: evaluateOrganizerSubscription(orgUser) }
     }),
-    ...admins.map((u) => sanitizeUser({ ...u, role: 'admin' }))
-  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    ...admins.map((u: any) => sanitizeUser({ ...u, role: 'admin' }))
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 }
 
 export async function createAdminOrganizer({
@@ -3785,13 +3785,13 @@ export async function listEventCompanionPosts(slugOrId) {
 
     return (store.companionPosts || [])
       .filter((p) => p.event_id === evt.id)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .map((post) => ({
         ...post,
         author: resolveAuthor(post.author_id),
         replies: (store.companionReplies || [])
           .filter((r) => r.post_id === post.id)
-          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
           .map((r) => ({ ...r, author: resolveAuthor(r.author_id) }))
       }))
   }

@@ -3,6 +3,7 @@ import passport from 'passport'
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20'
 import { env } from './env.js'
 import * as db from '../repositories/db.js'
+import type { AuthUser } from '../types/domain.js'
 
 export const isGoogleOAuthEnabled = Boolean(
   env.googleClientId &&
@@ -11,7 +12,7 @@ export const isGoogleOAuthEnabled = Boolean(
     !env.googleClientSecret.includes('your-')
 )
 
-export function signOAuthToken(user) {
+export function signOAuthToken(user: any): string {
   const payload = {
     id: user.id,
     email: user.email,
@@ -30,7 +31,7 @@ export function signOAuthToken(user) {
   return `oauth-jwt.${encoded}.${sig}`
 }
 
-export function verifyOAuthToken(token) {
+export function verifyOAuthToken(token: string): any | null {
   if (!token || !token.startsWith('oauth-jwt.')) return null
   const parts = token.split('.')
   if (parts.length !== 3) return null
@@ -84,9 +85,9 @@ if (isGoogleOAuthEnabled) {
             email_verified: true
           })
 
-          return done(null, user)
+          return done(null, user as any)
         } catch (err) {
-          return done(err)
+          return done(err as Error)
         }
       }
     )

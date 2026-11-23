@@ -10,16 +10,16 @@ const hasValidDatabaseUrl = Boolean(
 
 export const isDatabaseConfigured = hasValidDatabaseUrl
 
-const globalForPrisma = globalThis
+const globalForPrisma = globalThis as unknown as { __terraPrisma?: PrismaClient | null }
 
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient | null {
   if (!hasValidDatabaseUrl) return null
   return new PrismaClient({
     log: env.nodeEnv === 'development' ? ['warn', 'error'] : ['error']
   })
 }
 
-export const prisma = hasValidDatabaseUrl
+export const prisma: any = hasValidDatabaseUrl
   ? globalForPrisma.__terraPrisma || (globalForPrisma.__terraPrisma = createPrismaClient())
   : null
 
@@ -41,7 +41,7 @@ export async function checkDatabaseHealth() {
       connected: true,
       mode: 'postgresql-connected'
     }
-  } catch (err) {
+  } catch (err: any) {
     return {
       orm: 'prisma',
       configured: true,
@@ -52,15 +52,15 @@ export async function checkDatabaseHealth() {
   }
 }
 
-export async function disconnectPrisma() {
+export async function disconnectPrisma(): Promise<void> {
   if (prisma) {
     await prisma.$disconnect()
   }
 }
 
-export function runTransaction(fn, client = prisma) {
-  return client.$transaction(fn, {
+export function runTransaction<T>(fn: (tx: any) => Promise<T>, client: PrismaClient | null = prisma): Promise<T> {
+  return client!.$transaction(fn as any, {
     maxWait: 15000,
     timeout: 25000
-  })
+  }) as Promise<T>
 }

@@ -8,6 +8,7 @@ node_modules/
 
 # Vercel & build/test artifacts
 .vercel
+dist/
 coverage/
 
 # Logs & OS files

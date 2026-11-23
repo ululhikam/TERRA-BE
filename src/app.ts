@@ -62,7 +62,10 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipTestRateLimit,
-  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Terlalu banyak percobaan autentikasi. Coba lagi nanti.' } }
+  message: {
+    success: false,
+    error: { code: 'RATE_LIMITED', message: 'Terlalu banyak percobaan autentikasi. Coba lagi nanti.' }
+  }
 })
 
 const sensitiveActionLimiter = rateLimit({
@@ -101,10 +104,10 @@ app.get('/', (_req, res) => {
   })
 })
 
-// API v1 Mount
+// API v1 Routes
 app.use('/api/v1', apiV1Router)
 
-// 404 & Global Error Handler
+// 404 & Error Handlers
 app.use(notFoundHandler)
 app.use(errorHandler)
 

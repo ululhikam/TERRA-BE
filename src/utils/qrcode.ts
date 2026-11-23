@@ -284,7 +284,7 @@ export function parseTicketQrPayload(rawInput) {
   }
 }
 
-export async function generateTicketQrDataUrl(qrPayload, options = {}) {
+export async function generateTicketQrDataUrl(qrPayload: any, options: any = {}) {
   if (!qrPayload) return ''
   if (options.event || options.branding) {
     return generateBrandedQrDataUrl(qrPayload, options)
@@ -300,7 +300,7 @@ export async function generateTicketQrDataUrl(qrPayload, options = {}) {
   })
 }
 
-export async function generateTicketQrBuffer(qrPayload, options = {}) {
+export async function generateTicketQrBuffer(qrPayload: any, options: any = {}) {
   if (!qrPayload) return Buffer.alloc(0)
   return QRCode.toBuffer(String(qrPayload), {
     type: 'png',
@@ -347,13 +347,13 @@ export async function generateBrandedQrBuffer(
   }
 }
 
-export async function generateBrandedQrDataUrl(qrPayload, options = {}) {
+export async function generateBrandedQrDataUrl(qrPayload: any, options: any = {}) {
   const buf = await generateBrandedQrBuffer(qrPayload, options)
   if (!buf.length) return ''
   return `data:image/png;base64,${buf.toString('base64')}`
 }
 
-export async function generateTicketQrSvg(qrPayload, options = {}) {
+export async function generateTicketQrSvg(qrPayload: any, options: any = {}) {
   if (!qrPayload) return ''
   return QRCode.toString(String(qrPayload), {
     type: 'svg',

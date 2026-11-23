@@ -1,13 +1,17 @@
+import type { Request, Response, NextFunction, RequestHandler } from 'express'
 import * as db from '../repositories/db.js'
 import * as pricingDb from '../repositories/pricing.db.js'
 import { AppError } from '../utils/response.js'
 
-export function requireEventModule(moduleKey, resolveEventId = null) {
-  return async (req, _res, next) => {
+export function requireEventModule(
+  moduleKey: string,
+  resolveEventId: ((req: Request) => string | undefined | null) | null = null
+): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       let eventId = req.params.id || req.params.eventId || req.body?.event_id
       if (!eventId && typeof resolveEventId === 'function') {
-        eventId = resolveEventId(req)
+        eventId = resolveEventId(req) || undefined
       }
       if (!eventId) {
         return next(new AppError('ID event tidak ditemukan.', 400, 'EVENT_ID_REQUIRED'))

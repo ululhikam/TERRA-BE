@@ -1,3 +1,4 @@
+import type { Request, Response, NextFunction } from 'express'
 import multer from 'multer'
 import { Prisma } from '@prisma/client'
 import { ZodError } from 'zod'
@@ -5,11 +6,11 @@ import { env } from '../config/env.js'
 import { logger } from '../utils/logger.js'
 import { AppError, sendError } from '../utils/response.js'
 
-export function notFoundHandler(req, _res, next) {
+export function notFoundHandler(req: Request, _res: Response, next: NextFunction) {
   next(new AppError(`Endpoint ${req.method} ${req.originalUrl} tidak ditemukan.`, 404, 'ROUTE_NOT_FOUND'))
 }
 
-function mapPrismaError(err) {
+function mapPrismaError(err: any) {
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === 'P2002') {
       const target = Array.isArray(err.meta?.target) ? err.meta.target.join(', ') : 'field'
@@ -44,7 +45,7 @@ function mapPrismaError(err) {
   return null
 }
 
-export function errorHandler(err, req, res, _next) {
+export function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof multer.MulterError) {
     const isTooLarge = err.code === 'LIMIT_FILE_SIZE'
     return sendError(res, {
@@ -66,7 +67,7 @@ export function errorHandler(err, req, res, _next) {
     code = 'VALIDATION_ERROR'
     message = 'Data input tidak valid.'
     details = err.issues.map((i) => ({ path: i.path.join('.'), message: i.message }))
-  } else if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+  } else if (err instanceof SyntaxError && (err as any).status === 400 && 'body' in err) {
     statusCode = 400
     code = 'INVALID_JSON'
     message = 'Payload JSON tidak valid atau rusak.'

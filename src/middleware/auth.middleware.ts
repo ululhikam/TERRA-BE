@@ -1,23 +1,25 @@
+import type { Request, Response, NextFunction } from 'express'
 import { env } from '../config/env.js'
 import { supabaseAdmin, isSupabaseEnabled } from '../config/supabase.js'
 import { verifyOAuthToken } from '../config/passport.js'
 import * as db from '../repositories/db.js'
 import { store } from '../repositories/store.js'
 import { AppError } from '../utils/response.js'
+import type { AuthUser } from '../types/domain.js'
 
-function isDemoTokenAllowed() {
+function isDemoTokenAllowed(): boolean {
   const nodeEnv = process.env.NODE_ENV || env.nodeEnv
   if (nodeEnv === 'production') return false
   return nodeEnv === 'test' || !isSupabaseEnabled || process.env.ALLOW_DEMO_TOKENS === 'true'
 }
 
-function assertNotSuspended(user) {
+function assertNotSuspended(user?: AuthUser | null) {
   if (user?.is_suspended) {
     throw new AppError('Akun Anda sedang ditangguhkan oleh Administrator.', 403, 'ACCOUNT_SUSPENDED')
   }
 }
 
-export async function requireAuth(req, _res, next) {
+export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization || ''
     if (!authHeader.startsWith('Bearer ')) {
@@ -32,7 +34,7 @@ export async function requireAuth(req, _res, next) {
         throw new AppError('Sesi Google OAuth tidak valid atau kedaluwarsa.', 401, 'INVALID_TOKEN')
       }
       const stored = await db.findUserByIdOrEmail(oauthUser.id, oauthUser.email, oauthUser.role)
-      const resolvedUser = stored || oauthUser
+      const resolvedUser = (stored || oauthUser) as AuthUser
       assertNotSuspended(resolvedUser)
       req.user = resolvedUser
       return next()
@@ -46,12 +48,12 @@ export async function requireAuth(req, _res, next) {
       }
       const roleHint = data.user.user_metadata?.role || null
       const stored = await db.findUserByIdOrEmail(data.user.id, data.user.email, roleHint)
-      const resolvedUser = stored || {
+      const resolvedUser = (stored || {
         id: data.user.id,
-        email: data.user.email,
-        full_name: data.user.user_metadata?.full_name || data.user.email,
+        email: data.user.email || '',
+        full_name: data.user.user_metadata?.full_name || data.user.email || 'User',
         role: data.user.user_metadata?.role || 'customer'
-      }
+      }) as AuthUser
       assertNotSuspended(resolvedUser)
       req.user = resolvedUser
       return next()
@@ -60,17 +62,17 @@ export async function requireAuth(req, _res, next) {
     // Demo / integration-test token mapping (strictly disabled in production)
     if (isDemoTokenAllowed()) {
       if (token === 'demo-token-admin') {
-        req.user = (await db.findUserById('usr-admin')) || store.users.find((u) => u.role === 'admin')
+        req.user = ((await db.findUserById('usr-admin')) || store.users.find((u) => u.role === 'admin')) as AuthUser
         assertNotSuspended(req.user)
         return next()
       }
       if (token === 'demo-token-organizer') {
-        req.user = (await db.findUserById('usr-organizer')) || store.users.find((u) => u.role === 'organizer')
+        req.user = ((await db.findUserById('usr-organizer')) || store.users.find((u) => u.role === 'organizer')) as AuthUser
         assertNotSuspended(req.user)
         return next()
       }
       if (token === 'demo-token-customer') {
-        req.user = (await db.findUserById('usr-customer')) || store.users.find((u) => u.role === 'customer')
+        req.user = ((await db.findUserById('usr-customer')) || store.users.find((u) => u.role === 'customer')) as AuthUser
         assertNotSuspended(req.user)
         return next()
       }
@@ -82,7 +84,7 @@ export async function requireAuth(req, _res, next) {
   }
 }
 
-export async function optionalAuth(req, res, next) {
+export async function optionalAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization || ''
   if (!authHeader.startsWith('Bearer ')) return next()
   return requireAuth(req, res, next)

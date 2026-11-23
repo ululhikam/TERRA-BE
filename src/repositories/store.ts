@@ -25,6 +25,44 @@ export const MODULE_CATALOG = [
 ]
 
 class BackendStore {
+  [key: string]: any
+  users: any[]
+  categories: any[]
+  organizations: any[]
+  organizationMembers: any[]
+  events: any[]
+  schedules: any[]
+  tasks: any[]
+  taskComments: any[]
+  teamMembers: any[]
+  teamInvites: any[]
+  ticketTypes: any[]
+  orders: any[]
+  participants: any[]
+  tickets: any[]
+  checkinLogs: any[]
+  budgets: Record<string, any>
+  incomes: any[]
+  expenses: any[]
+  vendors: any[]
+  sponsors: any[]
+  documents: any[]
+  surveys: any[]
+  verifications: any[]
+  reports: any[]
+  moderationLogs: any[]
+  activityLogs: any[]
+  notifications: any[]
+  companionPosts: any[]
+  pricingPlans: any[]
+  bundlePackages: any[]
+  promoCodes: any[]
+  eventSubscriptions: any[]
+  bundleCredits: any[]
+  billingTransactions: any[]
+  billingAuditLogs: any[]
+  emailOutbox: any[]
+
   constructor() {
     this.reset()
   }

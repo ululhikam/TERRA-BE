@@ -504,7 +504,7 @@ export async function seedDemafestPlan(prisma) {
 
     // Schedules / Rundown
     const fallbackDate = evtDef.start_at.slice(0, 10)
-    for (const [idx, sch] of evtDef.schedules.entries()) {
+    for (const [idx, sch] of (evtDef.schedules as any[]).entries()) {
       const schId = `sch-${evtDef.id}-${idx + 1}`
       const dateStr = sch.date || fallbackDate
       const locStr = sch.location || evtDef.location_name

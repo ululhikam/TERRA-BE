@@ -1,6 +1,8 @@
+import type { Request, Response, NextFunction, RequestHandler } from 'express'
+import type { ZodError, ZodTypeAny } from 'zod'
 import { AppError } from '../utils/response.js'
 
-function formatZodIssues(error) {
+function formatZodIssues(error: ZodError) {
   return error.issues.map((issue) => ({
     path: issue.path.join('.'),
     message: issue.message,
@@ -8,8 +10,8 @@ function formatZodIssues(error) {
   }))
 }
 
-export function validateBody(schema) {
-  return (req, _res, next) => {
+export function validateBody(schema: ZodTypeAny): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       return next(
@@ -21,8 +23,8 @@ export function validateBody(schema) {
   }
 }
 
-export function validateQuery(schema) {
-  return (req, _res, next) => {
+export function validateQuery(schema: ZodTypeAny): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
     const parsed = schema.safeParse(req.query)
     if (!parsed.success) {
       return next(
@@ -34,8 +36,8 @@ export function validateQuery(schema) {
   }
 }
 
-export function validateParams(schema) {
-  return (req, _res, next) => {
+export function validateParams(schema: ZodTypeAny): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
     const parsed = schema.safeParse(req.params)
     if (!parsed.success) {
       return next(

@@ -6,7 +6,7 @@ const server = app.listen(env.port, () => {
   console.log(`TERRA Backend API listening on http://localhost:${env.port}/api/v1`)
 })
 
-async function shutdown(signal) {
+async function shutdown(signal: string) {
   console.log(`Received ${signal}, shutting down gracefully...`)
   server.close(async () => {
     await disconnectPrisma()

@@ -5,7 +5,7 @@ import { env } from '../config/env.js'
 import { isSupabaseEnabled, supabaseAdmin } from '../config/supabase.js'
 import { AppError } from '../utils/response.js'
 
-const ensuredBuckets = new Set()
+const ensuredBuckets = new Set<string>()
 
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
@@ -43,7 +43,7 @@ export function getStorageConfigStatus() {
   }
 }
 
-export async function ensureStorageBucket(bucketName, isPublic = true) {
+export async function ensureStorageBucket(bucketName: string, isPublic = true): Promise<boolean> {
   if (!isSupabaseEnabled || !supabaseAdmin) return false
   if (ensuredBuckets.has(bucketName)) return true
 
@@ -69,19 +69,20 @@ export async function ensureStorageBucket(bucketName, isPublic = true) {
   return true
 }
 
-function sanitizeFileName(originalName = 'file') {
+function sanitizeFileName(originalName = 'file'): string {
   const ext = path.extname(originalName).toLowerCase().replace(/[^a-z0-9.]/g, '') || '.bin'
-  const base = path
-    .basename(originalName, path.extname(originalName))
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'asset'
+  const base =
+    path
+      .basename(originalName, path.extname(originalName))
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'asset'
   const rand = crypto.randomBytes(4).toString('hex')
   return `${Date.now()}-${rand}-${base}${ext}`
 }
 
-function sanitizeFolder(folder = 'general') {
+function sanitizeFolder(folder = 'general'): string {
   return (
     String(folder)
       .toLowerCase()
@@ -97,6 +98,13 @@ export async function uploadBufferToStorage({
   folder = 'general',
   bucketType = 'media',
   ownerId = 'shared'
+}: {
+  buffer: Buffer
+  originalName: string
+  mimeType: string
+  folder?: string
+  bucketType?: 'media' | 'documents' | string
+  ownerId?: string
 }) {
   if (!buffer || !buffer.length) {
     throw new AppError('File tidak ditemukan atau kosong.', 400, 'FILE_REQUIRED')
@@ -147,8 +155,8 @@ export async function uploadBufferToStorage({
     throw new AppError(`Gagal mengunggah file ke Supabase Storage: ${uploadErr.message}`, 500, 'STORAGE_UPLOAD_FAILED')
   }
 
-  let publicUrl = null
-  let signedUrl = null
+  let publicUrl: string | null = null
+  let signedUrl: string | null = null
   if (!isDocs) {
     const { data: pubData } = supabaseAdmin.storage.from(bucketName).getPublicUrl(objectPath)
     publicUrl = pubData?.publicUrl || null
@@ -172,9 +180,13 @@ export async function uploadBufferToStorage({
 }
 
 export async function createSignedDocumentUrl(
-  filePath,
-  { bucket = env.supabaseDocsBucket, expiresIn = 300, downloadName } = {}
-) {
+  filePath: string,
+  {
+    bucket = env.supabaseDocsBucket,
+    expiresIn = 300,
+    downloadName
+  }: { bucket?: string; expiresIn?: number; downloadName?: string } = {}
+): Promise<string> {
   if (!isSupabaseEnabled || !supabaseAdmin) {
     return `https://storage.supabase.co/signed/${filePath}?token=mock`
   }
@@ -194,7 +206,7 @@ export async function createSignedDocumentUrl(
   return data.signedUrl
 }
 
-export async function deleteStorageObject(filePath, bucket = env.supabaseMediaBucket) {
+export async function deleteStorageObject(filePath: string, bucket = env.supabaseMediaBucket): Promise<void> {
   if (!filePath || !isSupabaseEnabled || !supabaseAdmin) return
   await supabaseAdmin.storage.from(bucket).remove([filePath]).catch(() => {})
 }

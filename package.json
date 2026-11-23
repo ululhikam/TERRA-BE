@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Decoupled Express.js REST API for Modular Event Management & Ticket Marketplace",
-  "main": "src/server.js",
+  "main": "src/server.ts",
   "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
-    "test": "node --test tests/api.test.js",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build:ts": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/api.test.ts tests/security.test.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
@@ -19,7 +21,7 @@
     "db:studio": "prisma studio"
   },
   "prisma": {
-    "seed": "node prisma/seed.js"
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -43,6 +45,17 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
-    "prisma": "^6.19.3"
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "@types/pdfkit": "^0.17.7",
+    "@types/qrcode": "^1.5.6",
+    "prisma": "^6.19.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }

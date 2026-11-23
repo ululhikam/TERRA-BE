@@ -11,11 +11,11 @@ const SENSITIVE_KEYS = new Set([
   'resendapikey'
 ])
 
-function redactMeta(value, depth = 0) {
+function redactMeta(value: any, depth = 0): any {
   if (value == null || depth > 4) return value
   if (Array.isArray(value)) return value.map((item) => redactMeta(item, depth + 1))
   if (typeof value === 'object') {
-    const out = {}
+    const out: Record<string, any> = {}
     for (const [k, v] of Object.entries(value)) {
       out[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : redactMeta(v, depth + 1)
     }
@@ -24,7 +24,7 @@ function redactMeta(value, depth = 0) {
   return value
 }
 
-function formatEntry(level, message, meta = {}) {
+function formatEntry(level: string, message: string, meta: Record<string, any> = {}): string {
   return JSON.stringify({
     timestamp: new Date().toISOString(),
     level: level.toUpperCase(),
@@ -35,19 +35,19 @@ function formatEntry(level, message, meta = {}) {
 }
 
 export const logger = {
-  info(message, meta = {}) {
+  info(message: string, meta: Record<string, any> = {}) {
     if (env.nodeEnv === 'test') return
     console.info(formatEntry('info', message, meta))
   },
-  warn(message, meta = {}) {
+  warn(message: string, meta: Record<string, any> = {}) {
     if (env.nodeEnv === 'test') return
     console.warn(formatEntry('warn', message, meta))
   },
-  error(message, meta = {}) {
+  error(message: string, meta: Record<string, any> = {}) {
     if (env.nodeEnv === 'test' && !process.env.DEBUG_TESTS) return
     console.error(formatEntry('error', message, meta))
   },
-  debug(message, meta = {}) {
+  debug(message: string, meta: Record<string, any> = {}) {
     if (env.nodeEnv !== 'development') return
     console.debug(formatEntry('debug', message, meta))
   }

@@ -19,7 +19,7 @@ let server
 let baseUrl
 
 before(async () => {
-  await new Promise((resolve) => {
+  await new Promise<void>((resolve) => {
     server = app.listen(0, () => {
       const { port } = server.address()
       baseUrl = `http://127.0.0.1:${port}/api/v1`
@@ -30,7 +30,7 @@ before(async () => {
 
 after(async () => {
   if (server) {
-    await new Promise((resolve) => server.close(resolve))
+    await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 })
 
@@ -38,8 +38,8 @@ beforeEach(() => {
   store.reset()
 })
 
-async function request(path, { method = 'GET', token = null, body = null } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
+async function request(path: string, { method = 'GET', token = null, body = null }: any = {}) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
   const res = await fetch(`${baseUrl}${path}`, {
     method,
@@ -47,7 +47,7 @@ async function request(path, { method = 'GET', token = null, body = null } = {})
     body: body ? JSON.stringify(body) : undefined
   })
   const contentType = res.headers.get('content-type') || ''
-  let data
+  let data: any
   if (contentType.includes('application/json')) {
     data = await res.json()
   } else if (contentType.includes('application/pdf') || contentType.includes('image/png')) {
@@ -435,7 +435,7 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       headers: { Authorization: 'Bearer demo-token-organizer' },
       body: form
     })
-    const uploadJson = await uploadRes.json()
+    const uploadJson: any = await uploadRes.json()
     assert.equal(uploadRes.status, 201)
     assert.equal(uploadJson.data.bucket, 'terra-media')
     assert.ok(uploadJson.data.public_url.includes('posters/usr-organizer/'))

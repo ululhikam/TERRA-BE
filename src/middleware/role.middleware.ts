@@ -1,15 +1,17 @@
+import type { Request, Response, NextFunction, RequestHandler } from 'express'
 import { AppError } from '../utils/response.js'
 import * as db from '../repositories/db.js'
 import * as pricingDb from '../repositories/pricing.db.js'
+import type { AuthUser, UserRole } from '../types/domain.js'
 
 export const ALL_EVENT_PERMISSIONS = db.ALL_EVENT_PERMISSIONS
 
-export async function getUserEventPermissions(user, eventId) {
+export async function getUserEventPermissions(user: AuthUser | null | undefined, eventId: string): Promise<string[]> {
   return db.getUserEventPermissions(user, eventId)
 }
 
-export function requireRole(...allowedRoles) {
-  return (req, _res, next) => {
+export function requireRole(...allowedRoles: UserRole[]): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) {
       return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
     }
@@ -24,8 +26,8 @@ export const requireAdmin = requireRole('admin')
 
 export const requireOrganizerOrAdmin = requireRole('organizer', 'admin')
 
-export function requireEventPermission(permissionKey) {
-  return async (req, _res, next) => {
+export function requireEventPermission(permissionKey: string): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
       if (req.user.role === 'admin') return next()
@@ -52,7 +54,7 @@ export function requireEventPermission(permissionKey) {
   }
 }
 
-export function requireOrgMembership(req, _res, next) {
+export function requireOrgMembership(req: Request, _res: Response, next: NextFunction) {
   ;(async () => {
     if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
     if (req.user.role === 'admin') return next()
@@ -62,7 +64,7 @@ export function requireOrgMembership(req, _res, next) {
       return next(new AppError('ID organisasi tidak ditemukan.', 400, 'ORG_ID_REQUIRED'))
     }
 
-    const { allowed, member } = await db.isOrgMember(orgId, req.user)
+    const { allowed, member }: any = await db.isOrgMember(orgId, req.user)
     if (!allowed) {
       return next(new AppError('Akses ditolak: Anda bukan anggota organisasi ini.', 403, 'ORG_FORBIDDEN'))
     }
@@ -71,8 +73,8 @@ export function requireOrgMembership(req, _res, next) {
   })().catch(next)
 }
 
-export function requireOrgRole(...allowedOrgRoles) {
-  return async (req, _res, next) => {
+export function requireOrgRole(...allowedOrgRoles: string[]): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
       if (req.user.role === 'admin') return next()
@@ -82,7 +84,7 @@ export function requireOrgRole(...allowedOrgRoles) {
         return next(new AppError('ID organisasi tidak ditemukan.', 400, 'ORG_ID_REQUIRED'))
       }
 
-      const { allowed, member } = await db.isOrgMember(orgId, req.user)
+      const { allowed, member }: any = await db.isOrgMember(orgId, req.user)
       if (!allowed) {
         return next(new AppError('Akses ditolak: Anda bukan anggota organisasi ini.', 403, 'ORG_FORBIDDEN'))
       }
@@ -103,8 +105,16 @@ export function requireOrgRole(...allowedOrgRoles) {
   }
 }
 
-export function requireResourceEventAccess({ resolveEventId, moduleKey = null, permission = null }) {
-  return async (req, _res, next) => {
+export function requireResourceEventAccess({
+  resolveEventId,
+  moduleKey = null,
+  permission = null
+}: {
+  resolveEventId: (id: string, req: Request) => Promise<string | null | undefined> | string | null | undefined
+  moduleKey?: string | null
+  permission?: string | null
+}): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
       const eventId = await resolveEventId(req.params.id, req)

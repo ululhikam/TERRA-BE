@@ -1,7 +1,7 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { env } from './env.js'
 
-const isValidHttpUrl = (str) => {
+const isValidHttpUrl = (str: string): boolean => {
   try {
     const u = new URL(str)
     return u.protocol === 'http:' || u.protocol === 'https:'
@@ -12,38 +12,38 @@ const isValidHttpUrl = (str) => {
 
 export const isSupabaseEnabled = Boolean(
   env.supabaseUrl &&
-  env.supabaseServiceRoleKey &&
-  isValidHttpUrl(env.supabaseUrl) &&
-  !env.supabaseUrl.includes('your-project') &&
-  !env.supabaseServiceRoleKey.includes('your-service')
+    env.supabaseServiceRoleKey &&
+    isValidHttpUrl(env.supabaseUrl) &&
+    !env.supabaseUrl.includes('your-project') &&
+    !env.supabaseServiceRoleKey.includes('your-service')
 )
 
-export const supabaseAdmin = isSupabaseEnabled
+export const supabaseAdmin: SupabaseClient | null = isSupabaseEnabled
   ? createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false }
-  })
-  : null
-
-export const supabasePublic =
-  isSupabaseEnabled &&
-    env.supabaseAnonKey &&
-    !env.supabaseAnonKey.includes('your-supabase')
-    ? createClient(env.supabaseUrl, env.supabaseAnonKey, {
       auth: { autoRefreshToken: false, persistSession: false }
     })
+  : null
+
+export const supabasePublic: SupabaseClient | null =
+  isSupabaseEnabled &&
+  env.supabaseAnonKey &&
+  !env.supabaseAnonKey.includes('your-supabase')
+    ? createClient(env.supabaseUrl, env.supabaseAnonKey, {
+        auth: { autoRefreshToken: false, persistSession: false }
+      })
     : null
 
-export const supabaseOAuth =
+export const supabaseOAuth: SupabaseClient | null =
   isSupabaseEnabled &&
-    env.supabaseAnonKey &&
-    !env.supabaseAnonKey.includes('your-supabase')
+  env.supabaseAnonKey &&
+  !env.supabaseAnonKey.includes('your-supabase')
     ? createClient(env.supabaseUrl, env.supabaseAnonKey, {
-      auth: {
-        flowType: 'implicit',
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    })
+        auth: {
+          flowType: 'implicit',
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      })
     : null
 
 export async function checkSupabaseHealth() {
@@ -56,7 +56,7 @@ export async function checkSupabaseHealth() {
       return { configured: true, connected: false, mode: 'supabase-schema-pending', error: error.message }
     }
     return { configured: true, connected: true, mode: 'supabase-connected' }
-  } catch (err) {
+  } catch (err: any) {
     return { configured: true, connected: false, mode: 'supabase-unreachable', error: err.message }
   }
 }

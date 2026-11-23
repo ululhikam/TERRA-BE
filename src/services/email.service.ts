@@ -73,7 +73,7 @@ function formatEmailEventDate(value) {
 export async function sendEmail({ to, subject, html, attachments = [] }) {
   if (resend && isResendConfigured) {
     try {
-      const payload = {
+      const payload: Record<string, any> = {
         from: env.resendFromEmail,
         to: Array.isArray(to) ? to : [to],
         subject,
@@ -82,7 +82,7 @@ export async function sendEmail({ to, subject, html, attachments = [] }) {
       if (attachments.length) {
         payload.attachments = mapResendAttachments(attachments)
       }
-      const { data, error } = await resend.emails.send(payload)
+      const { data, error } = await resend.emails.send(payload as any)
 
       if (error) {
         return {
@@ -203,8 +203,8 @@ export async function sendTeamInviteEmail({
 export function buildTicketQrEmailHtml({
   customerName,
   eventTitle,
-  eventDate,
-  location,
+  eventDate = '',
+  location = '',
   event = null,
   eventLogoSrc = '',
   orderNumber,
@@ -212,7 +212,7 @@ export function buildTicketQrEmailHtml({
   qrImages,
   orderPdfUrl,
   useCidImages
-}) {
+}: any) {
   const branding = resolveEventBranding(
     event || {
       title: eventTitle || tickets[0]?.event_title || 'Event TERRA',
