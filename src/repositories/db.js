@@ -234,6 +234,12 @@ export async function incrementOtpAttempts(userId, roleHint = null) {
   return { ...updated, role: existing.role }
 }
 
+export function sanitizeUser(user) {
+  if (!user) return null
+  const { password_hash, otp_code_hash, otp_expires_at, otp_attempts, ...safe } = user
+  return safe
+}
+
 export async function markUserEmailVerified(userId, roleHint = null) {
   if (!usePrisma()) {
     const user = store.users.find((u) => u.id === userId)
@@ -256,6 +262,30 @@ export async function markUserEmailVerified(userId, roleHint = null) {
     }
   })
   return { ...updated, role: existing.role }
+}
+
+export async function resetUserPassword(userId, passwordHash, roleHint = null) {
+  if (!usePrisma()) {
+    const user = store.users.find((u) => u.id === userId)
+    if (!user) throw new AppError('User tidak ditemukan.', 404, 'USER_NOT_FOUND')
+    user.password_hash = passwordHash
+    user.otp_code_hash = null
+    user.otp_expires_at = null
+    user.otp_attempts = 0
+    return sanitizeUser(user)
+  }
+  const existing = await findUserById(userId, roleHint)
+  if (!existing) throw new AppError('User tidak ditemukan.', 404, 'USER_NOT_FOUND')
+  const updated = await roleDelegate(existing.role).update({
+    where: { id: userId },
+    data: {
+      password_hash: passwordHash,
+      otp_code_hash: null,
+      otp_expires_at: null,
+      otp_attempts: 0
+    }
+  })
+  return sanitizeUser({ ...updated, role: existing.role })
 }
 
 export async function updateUnverifiedEmail(userId, oldEmail, newEmail, { otpCodeHash, otpExpiresAt }, roleHint = null) {
@@ -350,6 +380,133 @@ export async function markNotificationRead(id, userId) {
   if (!existing) throw new AppError('Notifikasi tidak ditemukan.', 404, 'NOT_FOUND')
   return prisma.userNotification.update({ where: { id }, data: { is_read: true } })
 }
+
+export async function createNotification({
+  user_id,
+  user_role = 'customer',
+  title,
+  message,
+  type = 'info',
+  reference_type = null,
+  reference_id = null
+}) {
+  if (!user_id) return null
+  if (!usePrisma()) {
+    const notif = {
+      id: 'ntf-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      user_id,
+      user_role,
+      title,
+      message,
+      type,
+      reference_type,
+      reference_id,
+      is_read: false,
+      created_at: new Date().toISOString()
+    }
+    store.notifications.unshift(notif)
+    return notif
+  }
+  return prisma.userNotification.create({
+    data: { user_id, user_role, title, message, type, reference_type, reference_id }
+  })
+}
+
+export async function logActivity({
+  organization_id = null,
+  event_id = null,
+  user_id = null,
+  action,
+  entity_type,
+  entity_id = null,
+  metadata = {}
+}) {
+  if (!usePrisma()) {
+    const entry = {
+      id: 'log-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      organization_id,
+      event_id,
+      user_id,
+      action,
+      entity_type,
+      entity_id,
+      metadata,
+      created_at: new Date().toISOString()
+    }
+    store.activityLogs.unshift(entry)
+    return entry
+  }
+  const orgActor = user_id
+    ? await prisma.organizer.findUnique({ where: { id: user_id }, select: { id: true } })
+    : null
+  return prisma.activityLog.create({
+    data: {
+      organization_id,
+      event_id,
+      user_id: orgActor?.id || null,
+      action,
+      entity_type,
+      entity_id,
+      metadata
+    }
+  })
+}
+
+export async function listOrganizationActivityLogs(organizationId) {
+  if (!usePrisma()) {
+    return store.activityLogs.filter((l) => l.organization_id === organizationId)
+  }
+  return prisma.activityLog.findMany({
+    where: { organization_id: organizationId },
+    orderBy: { created_at: 'desc' },
+    take: 100
+  })
+}
+
+export async function listEventActivityLogs(eventId) {
+  if (!usePrisma()) {
+    return store.activityLogs.filter((l) => l.event_id === eventId)
+  }
+  return prisma.activityLog.findMany({
+    where: { event_id: eventId },
+    orderBy: { created_at: 'desc' },
+    take: 100
+  })
+}
+
+const RESOURCE_EVENT_MAP = {
+  schedule: { storeKey: 'schedules', model: 'eventSchedule' },
+  task: { storeKey: 'tasks', model: 'eventTask' },
+  ticketType: { storeKey: 'ticketTypes', model: 'ticketType' },
+  participant: { storeKey: 'participants', model: 'participant' },
+  income: { storeKey: 'incomes', model: 'financeIncome' },
+  expense: { storeKey: 'expenses', model: 'financeExpense' },
+  vendor: { storeKey: 'vendors', model: 'vendor' },
+  sponsor: { storeKey: 'sponsors', model: 'sponsor' },
+  document: { storeKey: 'documents', model: 'eventDocument' },
+  survey: { storeKey: 'surveys', model: 'eventSurvey' }
+}
+
+export async function findResourceEventId(type, id) {
+  const cfg = RESOURCE_EVENT_MAP[type]
+  if (!cfg || !id) return null
+  if (!usePrisma()) {
+    return (store[cfg.storeKey] || []).find((r) => r.id === id)?.event_id || null
+  }
+  const row = await prisma[cfg.model].findUnique({ where: { id }, select: { event_id: true } })
+  return row?.event_id || null
+}
+
+export const findScheduleEventId = (id) => findResourceEventId('schedule', id)
+export const findTaskEventId = (id) => findResourceEventId('task', id)
+export const findTicketTypeEventId = (id) => findResourceEventId('ticketType', id)
+export const findParticipantEventId = (id) => findResourceEventId('participant', id)
+export const findIncomeEventId = (id) => findResourceEventId('income', id)
+export const findExpenseEventId = (id) => findResourceEventId('expense', id)
+export const findVendorEventId = (id) => findResourceEventId('vendor', id)
+export const findSponsorEventId = (id) => findResourceEventId('sponsor', id)
+export const findDocumentEventId = (id) => findResourceEventId('document', id)
+export const findSurveyEventId = (id) => findResourceEventId('survey', id)
 
 // =============================================================================
 // ORGANIZATIONS
@@ -460,18 +617,59 @@ export async function createOrganization(data, user) {
   })
 }
 
-export async function updateOrganization(id, patch) {
+export async function isUserOrgMember(user, organizationId) {
+  if (!user || !organizationId) return false
+  if (user.role === 'admin') return true
+  if (!usePrisma()) {
+    const org = store.organizations.find((o) => o.id === organizationId)
+    if (!org) return false
+    return (
+      org.created_by === user.id ||
+      (org.members || []).some(
+        (m) => m.user_id === user.id || (user.email && m.email?.toLowerCase() === user.email.toLowerCase())
+      )
+    )
+  }
+  const org = await prisma.organization.findFirst({
+    where: { id: organizationId, deleted_at: null },
+    include: { members: true }
+  })
+  if (!org) return false
+  if (org.created_by === user.id) return true
+  return (org.members || []).some(
+    (m) => m.user_id === user.id || (user.email && m.email?.toLowerCase() === user.email.toLowerCase())
+  )
+}
+
+export async function updateOrganization(id, patch, userId = null) {
   if (!usePrisma()) {
     const org = store.organizations.find((o) => o.id === id)
     if (!org) throw new AppError('Organisasi tidak ditemukan.', 404, 'ORG_NOT_FOUND')
     Object.assign(org, patch)
+    await logActivity({
+      organization_id: org.id,
+      user_id: userId,
+      action: 'ORGANIZATION_UPDATED',
+      entity_type: 'organization',
+      entity_id: org.id,
+      metadata: { fields: Object.keys(patch || {}) }
+    })
     return org
   }
-  return prisma.organization.update({
+  const updated = await prisma.organization.update({
     where: { id },
     data: patch,
     include: { members: true }
   })
+  await logActivity({
+    organization_id: updated.id,
+    user_id: userId,
+    action: 'ORGANIZATION_UPDATED',
+    entity_type: 'organization',
+    entity_id: updated.id,
+    metadata: { fields: Object.keys(patch || {}) }
+  })
+  return updated
 }
 
 export async function deleteOrganization(id) {
@@ -496,9 +694,16 @@ export async function createOrgVerification(orgId, userId, documents = []) {
       review_notes: ''
     }
     store.verifications.unshift(ver)
+    await logActivity({
+      organization_id: orgId,
+      user_id: userId,
+      action: 'ORGANIZATION_VERIFICATION_SUBMITTED',
+      entity_type: 'organization_verification',
+      entity_id: ver.id
+    })
     return ver
   }
-  return prisma.organizerVerification.create({
+  const ver = await prisma.organizerVerification.create({
     data: {
       organization_id: orgId,
       submitted_by: userId,
@@ -506,11 +711,20 @@ export async function createOrgVerification(orgId, userId, documents = []) {
       documents
     }
   })
+  await logActivity({
+    organization_id: orgId,
+    user_id: userId,
+    action: 'ORGANIZATION_VERIFICATION_SUBMITTED',
+    entity_type: 'organization_verification',
+    entity_id: ver.id
+  })
+  return ver
 }
 
 export async function addOrganizationMember(orgId, { email, role }) {
   if (!usePrisma()) {
     const org = store.organizations.find((o) => o.id === orgId)
+    if (!org) throw new AppError('Organisasi tidak ditemukan.', 404, 'ORG_NOT_FOUND')
     const member = {
       id: 'om-' + Date.now(),
       user_id: 'usr-' + Date.now(),
@@ -538,23 +752,39 @@ export async function addOrganizationMember(orgId, { email, role }) {
 export async function updateOrganizationMember(orgId, memberId, patch) {
   if (!usePrisma()) {
     const org = store.organizations.find((o) => o.id === orgId)
+    if (!org) throw new AppError('Organisasi tidak ditemukan.', 404, 'ORG_NOT_FOUND')
     const member = org.members.find((m) => m.id === memberId)
-    if (!member) throw new AppError('Anggota tidak ditemukan.', 404, 'MEMBER_NOT_FOUND')
+    if (!member) throw new AppError('Anggota tidak ditemukan pada organisasi ini.', 404, 'MEMBER_NOT_FOUND')
     if (patch.role) member.role = patch.role
+    if (patch.status) member.status = patch.status
     return member
   }
+  const existing = await prisma.organizationMember.findFirst({
+    where: { id: memberId, organization_id: orgId }
+  })
+  if (!existing) throw new AppError('Anggota tidak ditemukan pada organisasi ini.', 404, 'MEMBER_NOT_FOUND')
   return prisma.organizationMember.update({
     where: { id: memberId },
-    data: { ...(patch.role ? { role: patch.role } : {}) }
+    data: {
+      ...(patch.role ? { role: patch.role } : {}),
+      ...(patch.status ? { status: patch.status } : {})
+    }
   })
 }
 
 export async function removeOrganizationMember(orgId, memberId) {
   if (!usePrisma()) {
     const org = store.organizations.find((o) => o.id === orgId)
+    if (!org) throw new AppError('Organisasi tidak ditemukan.', 404, 'ORG_NOT_FOUND')
+    const exists = org.members.some((m) => m.id === memberId)
+    if (!exists) throw new AppError('Anggota tidak ditemukan pada organisasi ini.', 404, 'MEMBER_NOT_FOUND')
     org.members = org.members.filter((m) => m.id !== memberId)
     return { id: memberId }
   }
+  const existing = await prisma.organizationMember.findFirst({
+    where: { id: memberId, organization_id: orgId }
+  })
+  if (!existing) throw new AppError('Anggota tidak ditemukan pada organisasi ini.', 404, 'MEMBER_NOT_FOUND')
   await prisma.organizationMember.delete({ where: { id: memberId } })
   return { id: memberId }
 }
@@ -733,6 +963,9 @@ export async function createEvent(data, user) {
       id: 'evt-' + Date.now(),
       ...data,
       slug,
+      parent_event_id: data.parent_event_id || null,
+      theme_color: data.theme_color || null,
+      faq: data.faq || [],
       status: 'Draft',
       publication_status: 'Unpublished',
       is_featured: false,
@@ -742,6 +975,14 @@ export async function createEvent(data, user) {
     }
     store.events.unshift(evt)
     await pricingDb.ensureEventEntitlement(evt.id)
+    await logActivity({
+      organization_id: evt.organization_id,
+      event_id: evt.id,
+      user_id: user.id,
+      action: 'EVENT_CREATED',
+      entity_type: 'event',
+      entity_id: evt.id
+    })
     return getEnrichedEvent(evt.id, user)
   }
 
@@ -751,6 +992,7 @@ export async function createEvent(data, user) {
   const created = await prisma.event.create({
     data: {
       organization_id: data.organization_id,
+      parent_event_id: data.parent_event_id || null,
       title: data.title,
       slug,
       description: data.description || null,
@@ -759,6 +1001,9 @@ export async function createEvent(data, user) {
       poster_url: data.poster_url || null,
       banner_url: data.banner_url || null,
       gallery: data.gallery || [],
+      speakers: data.speakers || [],
+      faq: data.faq || [],
+      theme_color: data.theme_color || null,
       location_type: data.location_type || 'offline',
       location_name: data.location_name || null,
       address: data.address || null,
@@ -775,12 +1020,21 @@ export async function createEvent(data, user) {
     }
   })
   await pricingDb.ensureEventEntitlement(created.id)
+  await logActivity({
+    organization_id: created.organization_id,
+    event_id: created.id,
+    user_id: user.id,
+    action: 'EVENT_CREATED',
+    entity_type: 'event',
+    entity_id: created.id
+  })
   return getEnrichedEvent(created.id, user)
 }
 
-export async function updateEvent(eventId, patch, schedules) {
+export async function updateEvent(eventId, patch, schedules, userId = null) {
   if (!usePrisma()) {
     const evt = store.getEvent(eventId)
+    const wasCancelled = evt.status === 'Cancelled'
     Object.assign(evt, patch)
     if (Array.isArray(schedules)) {
       store.schedules = store.schedules.filter((s) => s.event_id !== evt.id)
@@ -788,16 +1042,55 @@ export async function updateEvent(eventId, patch, schedules) {
         id: s.id || `sch-${Date.now()}-${idx}`,
         event_id: evt.id,
         date: s.date || (evt.start_at ? evt.start_at.slice(0, 10) : '2026-12-12'),
+        track: s.track || null,
         ...s
       }))
       store.schedules.push(...mapped)
     }
+    if (!wasCancelled && patch?.status === 'Cancelled') {
+      store.tickets.forEach((tk) => {
+        if (tk.event_id === evt.id && ['Active', 'Pending'].includes(tk.status)) {
+          tk.status = 'Cancelled'
+        }
+      })
+      const customerIds = new Set(
+        store.orders.filter((o) => o.event_id === evt.id && o.order_status !== 'Cancelled' && o.customer_id).map((o) => o.customer_id)
+      )
+      for (const cid of customerIds) {
+        await createNotification({
+          user_id: cid,
+          user_role: 'customer',
+          title: `Event Dibatalkan: ${evt.title}`,
+          message: `Event ${evt.title} telah dibatalkan oleh penyelenggara. Tiket aktif Anda telah dinonaktifkan.`,
+          type: 'warning',
+          reference_type: 'event',
+          reference_id: evt.id
+        })
+      }
+    }
+    await logActivity({
+      organization_id: evt.organization_id,
+      event_id: evt.id,
+      user_id: userId,
+      action: patch?.status === 'Cancelled' ? 'EVENT_CANCELLED' : 'EVENT_UPDATED',
+      entity_type: 'event',
+      entity_id: evt.id,
+      metadata: { fields: Object.keys(patch || {}) }
+    })
     return getEnrichedEvent(evt.id)
   }
+
+  let notifiedCustomers = []
+  let eventTitle = ''
+  let orgId = null
+  let cancelledNow = false
 
   await runTransaction(async (tx) => {
     const evt = await tx.event.findFirst({ where: { id: eventId, deleted_at: null } })
     if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+    orgId = evt.organization_id
+    eventTitle = patch?.title || evt.title
+    cancelledNow = evt.status !== 'Cancelled' && patch?.status === 'Cancelled'
 
     await tx.event.update({ where: { id: eventId }, data: patch })
 
@@ -809,6 +1102,7 @@ export async function updateEvent(eventId, patch, schedules) {
             event_id: eventId,
             title: s.title,
             description: s.description || null,
+            track: s.track || null,
             date: s.date || (evt.start_at ? evt.start_at.slice(0, 10) : '2026-12-12'),
             start_time: s.start_time,
             end_time: s.end_time,
@@ -820,6 +1114,39 @@ export async function updateEvent(eventId, patch, schedules) {
         })
       }
     }
+
+    if (cancelledNow) {
+      await tx.ticket.updateMany({
+        where: { event_id: eventId, status: { in: ['Active', 'Pending'] } },
+        data: { status: 'Cancelled' }
+      })
+      const orders = await tx.order.findMany({
+        where: { event_id: eventId, order_status: { not: 'Cancelled' }, customer_id: { not: null } },
+        select: { customer_id: true }
+      })
+      notifiedCustomers = [...new Set(orders.map((o) => o.customer_id).filter(Boolean))]
+    }
+  })
+
+  for (const cid of notifiedCustomers) {
+    await createNotification({
+      user_id: cid,
+      user_role: 'customer',
+      title: `Event Dibatalkan: ${eventTitle}`,
+      message: `Event ${eventTitle} telah dibatalkan oleh penyelenggara. Tiket Anda telah dinonaktifkan.`,
+      type: 'warning',
+      reference_type: 'event',
+      reference_id: eventId
+    })
+  }
+  await logActivity({
+    organization_id: orgId,
+    event_id: eventId,
+    user_id: userId,
+    action: cancelledNow ? 'EVENT_CANCELLED' : 'EVENT_UPDATED',
+    entity_type: 'event',
+    entity_id: eventId,
+    metadata: { fields: Object.keys(patch || {}) }
   })
 
   return getEnrichedEvent(eventId)
@@ -848,14 +1175,19 @@ export async function duplicateEvent(eventId, user) {
       created_by: user.id
     }
     store.events.unshift(copy)
+    await pricingDb.ensureEventEntitlement(copy.id)
     return getEnrichedEvent(copy.id, user)
   }
 
   const source = await prisma.event.findFirst({ where: { id: eventId, deleted_at: null } })
   if (!source) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+  const isOrganizerRow = user?.id
+    ? await prisma.organizer.findUnique({ where: { id: user.id }, select: { id: true } })
+    : null
   const created = await prisma.event.create({
     data: {
       organization_id: source.organization_id,
+      parent_event_id: source.parent_event_id || null,
       title: `${source.title} (Copy)`,
       slug: `${source.slug}-copy-${Math.floor(100 + Math.random() * 900)}`,
       description: source.description,
@@ -865,6 +1197,8 @@ export async function duplicateEvent(eventId, user) {
       banner_url: source.banner_url,
       gallery: source.gallery || [],
       speakers: source.speakers || [],
+      faq: source.faq || [],
+      theme_color: source.theme_color || null,
       location_type: source.location_type,
       location_name: source.location_name,
       address: source.address,
@@ -877,9 +1211,10 @@ export async function duplicateEvent(eventId, user) {
       publication_status: 'Unpublished',
       visibility: source.visibility,
       enabled_modules: source.enabled_modules || [],
-      created_by: user.id
+      created_by: isOrganizerRow?.id || null
     }
   })
+  await pricingDb.ensureEventEntitlement(created.id)
   return getEnrichedEvent(created.id, user)
 }
 
@@ -934,19 +1269,40 @@ export async function toggleEventModule(eventId, moduleKey, isEnabled, userId) {
   return enabled
 }
 
-export async function setEventModules(eventId, requestedModules) {
+export async function setEventModules(eventId, requestedModules, user = null) {
   const requested = new Set(requestedModules)
   requested.add('event_profile')
   if ((requested.has('participants') || requested.has('check_in')) && !requested.has('ticketing')) {
     throw new AppError('Modul participants dan check_in membutuhkan modul ticketing aktif.', 400, 'MODULE_DEPENDENCY_UNMET')
   }
   const enabled = [...requested]
+  if (user?.role !== 'admin') {
+    for (const moduleKey of enabled) {
+      await pricingDb.assertEventModuleAllowedByPlan(eventId, moduleKey)
+    }
+  }
   if (!usePrisma()) {
     const evt = store.getEvent(eventId)
     evt.enabled_modules = enabled
+    await logActivity({
+      organization_id: evt.organization_id,
+      event_id: evt.id,
+      user_id: user?.id || null,
+      action: 'MODULES_UPDATED',
+      entity_type: 'event_module',
+      metadata: { enabled }
+    })
     return enabled
   }
-  await prisma.event.update({ where: { id: eventId }, data: { enabled_modules: enabled } })
+  const updated = await prisma.event.update({ where: { id: eventId }, data: { enabled_modules: enabled } })
+  await logActivity({
+    organization_id: updated.organization_id,
+    event_id: updated.id,
+    user_id: user?.id || null,
+    action: 'MODULES_UPDATED',
+    entity_type: 'event_module',
+    metadata: { enabled }
+  })
   return enabled
 }
 
@@ -1241,9 +1597,11 @@ export async function listTasks(eventId) {
   })
 }
 
-export async function createTask(eventId, data) {
+export async function createTask(eventId, data, createdBy = null) {
   const isGroup = data.is_group ?? !data.parent_id
   const dueAt = data.due_at || data.due_date || '2026-12-01'
+  const labels = Array.isArray(data.labels) ? data.labels : []
+  const checklists = Array.isArray(data.checklists) ? data.checklists : []
   if (!usePrisma()) {
     const task = {
       id: (isGroup ? 'chk-' : 'tsk-') + Date.now(),
@@ -1251,6 +1609,9 @@ export async function createTask(eventId, data) {
       parent_id: data.parent_id || null,
       is_group: Boolean(isGroup),
       ...data,
+      labels,
+      checklists,
+      created_by: createdBy || null,
       due_at: dueAt,
       due_date: dueAt,
       comments: []
@@ -1258,6 +1619,9 @@ export async function createTask(eventId, data) {
     store.tasks.push(task)
     return task
   }
+  const orgCreator = createdBy
+    ? await prisma.organizer.findUnique({ where: { id: createdBy }, select: { id: true } })
+    : null
   return prisma.eventTask.create({
     data: {
       event_id: eventId,
@@ -1272,7 +1636,10 @@ export async function createTask(eventId, data) {
       start_date: data.start_date || null,
       due_at: dueAt,
       due_date: dueAt,
-      progress: Number(data.progress || 0)
+      progress: Number(data.progress || 0),
+      labels,
+      checklists,
+      created_by: orgCreator?.id || null
     },
     include: { comments: true }
   })
@@ -1379,31 +1746,52 @@ export async function listTicketTypes(eventId) {
   return prisma.ticketType.findMany({ where: { event_id: eventId } })
 }
 
+function pickTicketTypeFields(data = {}) {
+  const allowed = [
+    'name', 'category', 'description', 'price', 'quantity', 'currency',
+    'status', 'min_per_order', 'max_per_order', 'sale_start_at', 'sale_end_at',
+    'benefits', 'terms'
+  ]
+  const out = {}
+  for (const key of allowed) {
+    if (data[key] !== undefined) out[key] = data[key]
+  }
+  return out
+}
+
 export async function createTicketType(eventId, data) {
+  const clean = pickTicketTypeFields(data)
   if (!usePrisma()) {
-    const item = { id: 'tkt-' + Date.now(), event_id: eventId, sold_quantity: 0, ...data }
+    const item = {
+      id: 'tkt-' + Date.now(),
+      event_id: eventId,
+      sold_quantity: 0,
+      benefits: [],
+      ...clean
+    }
     store.ticketTypes.push(item)
     return item
   }
-  return prisma.ticketType.create({ data: { event_id: eventId, sold_quantity: 0, ...data } })
+  return prisma.ticketType.create({ data: { event_id: eventId, sold_quantity: 0, ...clean } })
 }
 
 export async function updateTicketType(id, patch) {
+  const clean = pickTicketTypeFields(patch)
   if (!usePrisma()) {
     const tkt = store.ticketTypes.find((t) => t.id === id)
     if (!tkt) throw new AppError('Jenis tiket tidak ditemukan.', 404, 'TICKET_TYPE_NOT_FOUND')
-    if (patch.quantity !== undefined && Number(patch.quantity) < tkt.sold_quantity) {
+    if (clean.quantity !== undefined && Number(clean.quantity) < tkt.sold_quantity) {
       throw new AppError('Kuota tidak boleh lebih kecil dari jumlah tiket yang sudah terjual.', 400, 'INVALID_QUOTA')
     }
-    Object.assign(tkt, patch)
+    Object.assign(tkt, clean)
     return tkt
   }
   const tkt = await prisma.ticketType.findUnique({ where: { id } })
   if (!tkt) throw new AppError('Jenis tiket tidak ditemukan.', 404, 'TICKET_TYPE_NOT_FOUND')
-  if (patch.quantity !== undefined && Number(patch.quantity) < tkt.sold_quantity) {
+  if (clean.quantity !== undefined && Number(clean.quantity) < tkt.sold_quantity) {
     throw new AppError('Kuota tidak boleh lebih kecil dari jumlah tiket yang sudah terjual.', 400, 'INVALID_QUOTA')
   }
-  return prisma.ticketType.update({ where: { id }, data: patch })
+  return prisma.ticketType.update({ where: { id }, data: clean })
 }
 
 export async function deleteTicketType(id) {
@@ -1448,9 +1836,30 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
   if (evt.status === 'Cancelled') {
     throw new AppError('Event telah dibatalkan dan tidak menerima pemesanan.', 409, 'EVENT_CANCELLED')
   }
+  if (evt.publication_status !== 'Published') {
+    throw new AppError('Event belum dipublikasikan dan tidak menerima pemesanan.', 409, 'EVENT_NOT_PUBLISHED')
+  }
   if (!tkt) throw new AppError('Jenis tiket tidak ditemukan.', 404, 'TICKET_TYPE_NOT_FOUND')
   if (tkt.status !== 'On Sale') {
     throw new AppError(`Tiket sedang dalam status ${tkt.status}.`, 409, 'TICKET_NOT_ON_SALE')
+  }
+
+  const now = new Date()
+  if (tkt.sale_start_at && new Date(tkt.sale_start_at) > now) {
+    throw new AppError('Periode penjualan tiket ini belum dimulai.', 409, 'TICKET_SALE_NOT_STARTED')
+  }
+  if (tkt.sale_end_at && new Date(tkt.sale_end_at) < now) {
+    throw new AppError('Periode penjualan tiket ini telah berakhir.', 409, 'TICKET_SALE_ENDED')
+  }
+
+  const minOrder = Number(tkt.min_per_order || 1)
+  const maxOrder = Number(tkt.max_per_order || 10)
+  if (quantity < minOrder || quantity > maxOrder) {
+    throw new AppError(
+      `Jumlah tiket harus antara ${minOrder} sampai ${maxOrder} per transaksi.`,
+      400,
+      'INVALID_TICKET_QUANTITY'
+    )
   }
 
   // Resolve FK-safe customer_id outside the atomic write transaction
@@ -1488,10 +1897,14 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
 
   const subtotal = Number(tkt.price) * quantity
   const isFree = Number(tkt.price) === 0
+  const orderStatus = isFree ? 'Confirmed' : 'Pending'
+  const paymentStatus = isFree ? 'Not Required' : 'Pending'
+  const registrationStatus = isFree ? 'Confirmed' : 'Pending'
+  const initialTicketStatus = isFree ? 'Active' : 'Pending'
   const orderNumber = generateOrderNumber()
   const ticketDrafts = Array.from({ length: quantity }, () => {
     const code = generateTicketCode()
-    const rawToken = `TERRA:${code}:${event_id}:${generateQrToken().slice(0, 8)}`
+    const rawToken = `TERRA:${code}:${event_id}:${generateQrToken().slice(0, 16)}`
     return {
       code,
       rawToken,
@@ -1499,23 +1912,30 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
     }
   })
 
-  return runTransaction(async (tx) => {
-    const reserved = await tx.ticketType.updateMany({
-      where: {
-        id: ticket_type_id,
-        event_id,
-        status: 'On Sale',
-        sold_quantity: { lte: tkt.quantity - quantity }
-      },
-      data: { sold_quantity: { increment: quantity } }
-    })
-    if (reserved.count === 0) {
+  const result = await runTransaction(async (tx) => {
+    const lockedRows = await tx.$queryRaw`
+      SELECT id, quantity, sold_quantity, status
+      FROM ticket_types
+      WHERE id = ${ticket_type_id} AND event_id = ${event_id}
+      FOR UPDATE
+    `
+    const locked = lockedRows[0]
+    if (!locked) throw new AppError('Jenis tiket tidak ditemukan.', 404, 'TICKET_TYPE_NOT_FOUND')
+    if (locked.status !== 'On Sale') {
+      throw new AppError(`Tiket sedang dalam status ${locked.status}.`, 409, 'TICKET_NOT_ON_SALE')
+    }
+    if (Number(locked.quantity) - Number(locked.sold_quantity) < quantity) {
       throw new AppError('Kuota tiket tidak mencukupi.', 409, 'TICKET_SOLD_OUT')
     }
 
-    if (tkt.sold_quantity + quantity >= tkt.quantity) {
-      await tx.ticketType.update({ where: { id: ticket_type_id }, data: { status: 'Sold Out' } })
-    }
+    const nextSold = Number(locked.sold_quantity) + quantity
+    await tx.ticketType.update({
+      where: { id: ticket_type_id },
+      data: {
+        sold_quantity: nextSold,
+        ...(nextSold >= Number(locked.quantity) ? { status: 'Sold Out' } : {})
+      }
+    })
 
     const order = await tx.order.create({
       data: {
@@ -1527,8 +1947,8 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
         subtotal,
         total: subtotal,
         currency: tkt.currency,
-        order_status: 'Confirmed',
-        payment_status: isFree ? 'Not Required' : 'Paid',
+        order_status: orderStatus,
+        payment_status: paymentStatus,
         items: {
           create: {
             ticket_type_id,
@@ -1551,7 +1971,8 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
         ticket_type: tkt.name,
         ticket_code: ticketDrafts[0]?.code || null,
         order_number: orderNumber,
-        registration_status: 'Confirmed',
+        registration_status: registrationStatus,
+        registration_data: attendee.registration_data || {},
         checked_in: false
       }
     })
@@ -1570,7 +1991,7 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
       qr_payload: draft.rawToken,
       qr_token_hash: draft.hash,
       participant_name: attendee.full_name,
-      status: 'Active'
+      status: initialTicketStatus
     }))
 
     await tx.ticket.createMany({ data: ticketData })
@@ -1578,19 +1999,169 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
 
     return { order, participant, tickets: issuedTickets }
   })
+
+  await logActivity({
+    organization_id: evt.organization_id,
+    event_id,
+    user_id: customer_id || null,
+    action: 'ORDER_CREATED',
+    entity_type: 'order',
+    entity_id: result.order.id,
+    metadata: { order_number: orderNumber, quantity, is_free: isFree }
+  })
+
+  return result
 }
 
-export async function cancelOrder(orderId, userId, isAdmin = false) {
-  if (!usePrisma()) return store.cancelOrder(orderId, userId, isAdmin)
+export async function submitOrderPaymentProof(orderId, user, { payment_proof_url, payment_notes = '' }) {
+  if (!usePrisma()) {
+    const order = store.orders.find((o) => o.id === orderId)
+    if (!order) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+    if (order.customer_id !== user.id && user.role !== 'admin') {
+      throw new AppError('Anda tidak berhak mengunggah bukti untuk order ini.', 403, 'FORBIDDEN')
+    }
+    if (order.order_status === 'Cancelled') {
+      throw new AppError('Order telah dibatalkan.', 409, 'ORDER_ALREADY_CANCELLED')
+    }
+    if (['Verified', 'Paid', 'Not Required'].includes(order.payment_status)) {
+      throw new AppError('Order ini sudah terverifikasi atau tidak memerlukan pembayaran.', 409, 'PAYMENT_ALREADY_SETTLED')
+    }
+    order.payment_proof_url = payment_proof_url
+    order.payment_notes = payment_notes || order.payment_notes
+    return order
+  }
+
+  const order = await prisma.order.findUnique({ where: { id: orderId } })
+  if (!order) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+  if (order.customer_id !== user.id && user.role !== 'admin') {
+    throw new AppError('Anda tidak berhak mengunggah bukti untuk order ini.', 403, 'FORBIDDEN')
+  }
+  if (order.order_status === 'Cancelled') {
+    throw new AppError('Order telah dibatalkan.', 409, 'ORDER_ALREADY_CANCELLED')
+  }
+  if (['Verified', 'Paid', 'Not Required'].includes(order.payment_status)) {
+    throw new AppError('Order ini sudah terverifikasi atau tidak memerlukan pembayaran.', 409, 'PAYMENT_ALREADY_SETTLED')
+  }
+
+  return prisma.order.update({
+    where: { id: orderId },
+    data: {
+      payment_proof_url,
+      payment_notes: payment_notes || order.payment_notes
+    }
+  })
+}
+
+export async function verifyOrderPayment(eventId, orderId, operatorUser) {
+  if (!usePrisma()) {
+    const order = store.orders.find((o) => o.id === orderId && o.event_id === eventId)
+    if (!order) throw new AppError('Order tidak ditemukan pada event ini.', 404, 'ORDER_NOT_FOUND')
+    if (order.order_status === 'Cancelled') {
+      throw new AppError('Order sudah dibatalkan dan tidak dapat diverifikasi.', 409, 'ORDER_ALREADY_CANCELLED')
+    }
+    order.order_status = 'Confirmed'
+    order.payment_status = 'Verified'
+    order.verified_by = operatorUser?.id || null
+    order.verified_at = new Date().toISOString()
+
+    const tickets = store.tickets.filter((tk) => tk.order_id === order.id)
+    tickets.forEach((tk) => {
+      if (tk.status === 'Pending') tk.status = 'Active'
+    })
+    const participant = store.participants.find((p) => p.order_id === order.id)
+    if (participant && participant.registration_status === 'Pending') {
+      participant.registration_status = 'Confirmed'
+    }
+    if (order.customer_id) {
+      await createNotification({
+        user_id: order.customer_id,
+        user_role: 'customer',
+        title: `Pembayaran Terverifikasi: ${order.order_number}`,
+        message: `Pembayaran tiket Anda telah diverifikasi oleh penyelenggara. E-Tiket QR kini aktif.`,
+        type: 'success',
+        reference_type: 'order',
+        reference_id: order.id
+      })
+    }
+    await logActivity({
+      event_id: eventId,
+      user_id: operatorUser?.id || null,
+      action: 'ORDER_PAYMENT_VERIFIED',
+      entity_type: 'order',
+      entity_id: order.id
+    })
+    return { order, participant, tickets }
+  }
+
+  const result = await runTransaction(async (tx) => {
+    const order = await tx.order.findFirst({ where: { id: orderId, event_id: eventId } })
+    if (!order) throw new AppError('Order tidak ditemukan pada event ini.', 404, 'ORDER_NOT_FOUND')
+    if (order.order_status === 'Cancelled') {
+      throw new AppError('Order sudah dibatalkan dan tidak dapat diverifikasi.', 409, 'ORDER_ALREADY_CANCELLED')
+    }
+
+    const updatedOrder = await tx.order.update({
+      where: { id: orderId },
+      data: {
+        order_status: 'Confirmed',
+        payment_status: 'Verified',
+        verified_by: operatorUser?.id || null,
+        verified_at: new Date()
+      }
+    })
+    await tx.ticket.updateMany({
+      where: { order_id: orderId, status: 'Pending' },
+      data: { status: 'Active' }
+    })
+    await tx.participant.updateMany({
+      where: { order_id: orderId, registration_status: 'Pending' },
+      data: { registration_status: 'Confirmed' }
+    })
+
+    const [participant, tickets] = await Promise.all([
+      tx.participant.findFirst({ where: { order_id: orderId } }),
+      tx.ticket.findMany({ where: { order_id: orderId } })
+    ])
+    return { order: updatedOrder, participant, tickets }
+  })
+
+  if (result.order.customer_id) {
+    await createNotification({
+      user_id: result.order.customer_id,
+      user_role: 'customer',
+      title: `Pembayaran Terverifikasi: ${result.order.order_number}`,
+      message: 'Pembayaran tiket Anda telah diverifikasi oleh penyelenggara. E-Tiket QR kini aktif.',
+      type: 'success',
+      reference_type: 'order',
+      reference_id: result.order.id
+    })
+  }
+  await logActivity({
+    event_id: eventId,
+    user_id: operatorUser?.id || null,
+    action: 'ORDER_PAYMENT_VERIFIED',
+    entity_type: 'order',
+    entity_id: result.order.id
+  })
+  return result
+}
+
+export async function cancelOrder(orderId, userId, isAdminOrAuthorized = false) {
+  if (!usePrisma()) return store.cancelOrder(orderId, userId, isAdminOrAuthorized)
 
   return runTransaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId } })
     if (!order) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
-    if (!isAdmin && order.customer_id !== userId) {
+    if (!isAdminOrAuthorized && order.customer_id !== userId) {
       throw new AppError('Tidak memiliki izin membatalkan order ini.', 403, 'FORBIDDEN')
     }
     if (order.order_status === 'Cancelled') {
       throw new AppError('Order sudah dibatalkan sebelumnya.', 409, 'ORDER_ALREADY_CANCELLED')
+    }
+
+    const usedTickets = await tx.ticket.count({ where: { order_id: orderId, status: 'Used' } })
+    if (usedTickets > 0) {
+      throw new AppError('Order tidak dapat dibatalkan karena tiket sudah digunakan check-in.', 409, 'ORDER_ALREADY_USED')
     }
 
     if (order.ticket_type_id) {
@@ -1701,6 +2272,13 @@ export async function validateOrCheckIn(codeOrQr, station, operatorId, commitChe
     if (!ticket) {
       throw new AppError(`Tiket "${cleanCode || raw}" tidak ditemukan atau tidak valid.`, 404, 'TICKET_NOT_FOUND')
     }
+    const evt = await tx.event.findFirst({
+      where: { id: ticket.event_id, deleted_at: null },
+      select: { id: true, status: true }
+    })
+    if (evt && evt.status === 'Cancelled') {
+      throw new AppError('Event telah dibatalkan sehingga check-in ditutup.', 409, 'EVENT_CANCELLED')
+    }
     if (parsed.isTerraQr && parsed.eventId && ticket.event_id !== parsed.eventId) {
       throw new AppError('Payload QR Code tidak sesuai dengan event tiket.', 400, 'INVALID_QR_PAYLOAD')
     }
@@ -1710,6 +2288,12 @@ export async function validateOrCheckIn(codeOrQr, station, operatorId, commitChe
         409,
         'WRONG_EVENT_TICKET'
       )
+    }
+    if (ticket.status === 'Pending') {
+      throw new AppError('Pembayaran tiket belum diverifikasi oleh panitia.', 409, 'TICKET_PAYMENT_PENDING')
+    }
+    if (ticket.status === 'Expired') {
+      throw new AppError('Tiket telah kedaluwarsa dan tidak berlaku.', 409, 'TICKET_EXPIRED')
     }
     if (ticket.status === 'Cancelled') {
       throw new AppError('Tiket telah dibatalkan dan tidak berlaku.', 409, 'TICKET_CANCELLED')
@@ -1801,7 +2385,7 @@ export async function listParticipants(eventId, { search, checked_in } = {}) {
 export async function createManualParticipant(eventId, data) {
   await pricingDb.assertEventQuotaAvailable(eventId, 'participants', 1)
   const code = generateTicketCode()
-  const rawPayload = `TERRA:${code}:${eventId}`
+  const rawPayload = `TERRA:${code}:${eventId}:${generateQrToken().slice(0, 16)}`
   if (!usePrisma()) {
     const p = {
       id: 'pt-' + Date.now(),
@@ -1812,6 +2396,8 @@ export async function createManualParticipant(eventId, data) {
       ticket_type: data.ticket_type || 'Manual Registration',
       ticket_code: code,
       order_number: 'MAN-' + Math.floor(10000 + Math.random() * 90000),
+      registration_status: data.registration_status || 'Confirmed',
+      registration_data: data.registration_data || {},
       checked_in: false
     }
     store.participants.unshift(p)
@@ -1844,6 +2430,7 @@ export async function createManualParticipant(eventId, data) {
         ticket_code: code,
         order_number: 'MAN-' + Math.floor(10000 + Math.random() * 90000),
         registration_status: data.registration_status || 'Confirmed',
+        registration_data: data.registration_data || {},
         checked_in: false
       }
     })
@@ -2127,6 +2714,9 @@ export async function createDocument(eventId, body, userId) {
     event_id: eventId,
     uploaded_by: userId || null,
     file_name: body?.file_name || 'Document.pdf',
+    file_type: body?.file_type || null,
+    description: body?.description || null,
+    version: Number(body?.version || 1),
     category: body?.category || 'Operasional',
     visibility: body?.visibility || 'internal',
     file_path: body?.file_path || `events/${eventId}/${Date.now()}.pdf`
@@ -2165,14 +2755,17 @@ export async function listSurveys(eventId) {
 }
 
 export async function createSurvey(eventId, body) {
+  const questions = Array.isArray(body?.questions) ? body.questions : []
   if (!usePrisma()) {
     const srv = {
       id: 'srv-' + Date.now(),
       event_id: eventId,
       title: body?.title || 'Survey Event',
       description: body?.description || '',
+      questions,
       is_active: true,
-      responses: []
+      responses: [],
+      created_at: new Date().toISOString()
     }
     store.surveys.unshift(srv)
     return srv
@@ -2182,22 +2775,64 @@ export async function createSurvey(eventId, body) {
       event_id: eventId,
       title: body?.title || 'Survey Event',
       description: body?.description || '',
+      questions,
       is_active: true,
       responses: []
     }
   })
 }
 
+export async function listPublicSurveysByEvent(slugOrId) {
+  if (!usePrisma()) {
+    const evt = store.events.find(
+      (e) =>
+        !e.deleted_at &&
+        e.publication_status === 'Published' &&
+        e.status !== 'Cancelled' &&
+        (e.slug === slugOrId || e.id === slugOrId)
+    )
+    if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+    if (!evt.enabled_modules.includes('feedback')) return []
+    return store.surveys
+      .filter((s) => s.event_id === evt.id && s.is_active !== false)
+      .map(({ responses, ...rest }) => ({ ...rest, response_count: asArray(responses).length }))
+  }
+  const evt = await prisma.event.findFirst({
+    where: {
+      deleted_at: null,
+      publication_status: 'Published',
+      status: { not: 'Cancelled' },
+      OR: [{ slug: slugOrId }, { id: slugOrId }]
+    },
+    select: { id: true, enabled_modules: true }
+  })
+  if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+  if (!asArray(evt.enabled_modules).includes('feedback')) return []
+  const surveys = await prisma.eventSurvey.findMany({
+    where: { event_id: evt.id, is_active: true },
+    orderBy: { created_at: 'desc' }
+  })
+  return surveys.map(({ responses, ...rest }) => ({ ...rest, response_count: asArray(responses).length }))
+}
+
 export async function submitSurveyResponse(surveyId, userId, answers = {}) {
   if (!usePrisma()) {
     const srv = store.surveys.find((s) => s.id === surveyId)
     if (!srv) throw new AppError('Survey tidak ditemukan.', 404, 'SURVEY_NOT_FOUND')
+    if (srv.is_active === false) throw new AppError('Survey sudah ditutup.', 409, 'SURVEY_INACTIVE')
+    if (!store.isModuleEnabled(srv.event_id, 'feedback')) {
+      throw new AppError('Modul feedback sedang nonaktif pada event ini.', 403, 'MODULE_DISABLED')
+    }
     const resp = { id: 'res-' + Date.now(), user_id: userId, answers, submitted_at: new Date().toISOString() }
     srv.responses.push(resp)
     return resp
   }
   const srv = await prisma.eventSurvey.findUnique({ where: { id: surveyId } })
   if (!srv) throw new AppError('Survey tidak ditemukan.', 404, 'SURVEY_NOT_FOUND')
+  if (!srv.is_active) throw new AppError('Survey sudah ditutup.', 409, 'SURVEY_INACTIVE')
+  if (!(await isModuleEnabled(srv.event_id, 'feedback'))) {
+    throw new AppError('Modul feedback sedang nonaktif pada event ini.', 403, 'MODULE_DISABLED')
+  }
   const resp = { id: 'res-' + Date.now(), user_id: userId, answers, submitted_at: new Date().toISOString() }
   const responses = [...asArray(srv.responses), resp]
   await prisma.eventSurvey.update({ where: { id: surveyId }, data: { responses } })
@@ -2206,13 +2841,30 @@ export async function submitSurveyResponse(surveyId, userId, answers = {}) {
 
 export async function getEventReports(eventId) {
   const evt = await getEventOrThrow(eventId)
-  const tickets = await listTicketTypes(evt.id)
-  const evtParticipants = await listParticipants(evt.id)
-  const finance = await getFinanceSummary(evt.id)
+  const [tickets, evtParticipants, finance, tasks, schedules, vendors, sponsors] = await Promise.all([
+    listTicketTypes(evt.id),
+    listParticipants(evt.id),
+    getFinanceSummary(evt.id),
+    listTasks(evt.id),
+    listSchedules(evt.id),
+    listVendors(evt.id),
+    listSponsors(evt.id)
+  ])
 
   const totalQuota = tickets.reduce((s, t) => s + Number(t.quantity), 0)
   const totalSold = tickets.reduce((s, t) => s + Number(t.sold_quantity), 0)
   const checkedIn = evtParticipants.filter((p) => p.checked_in).length
+
+  const leafTasks = tasks.filter((t) => !t.is_group)
+  const taskPool = leafTasks.length ? leafTasks : tasks
+  const tasks_summary = {
+    total: taskPool.length,
+    todo: taskPool.filter((t) => t.status === 'To Do').length,
+    in_progress: taskPool.filter((t) => t.status === 'In Progress').length,
+    review: taskPool.filter((t) => t.status === 'Review').length,
+    done: taskPool.filter((t) => t.status === 'Done').length,
+    cancelled: taskPool.filter((t) => t.status === 'Cancelled').length
+  }
 
   return {
     event_id: evt.id,
@@ -2223,6 +2875,10 @@ export async function getEventReports(eventId) {
     registered_participants: evtParticipants.length,
     checked_in_count: checkedIn,
     attendance_rate_pct: evtParticipants.length ? Math.round((checkedIn / evtParticipants.length) * 100) : 0,
+    tasks_summary,
+    schedules_total: schedules.length,
+    vendors_count: vendors.length,
+    sponsors_count: sponsors.length,
     finance
   }
 }
@@ -2230,66 +2886,171 @@ export async function getEventReports(eventId) {
 // =============================================================================
 // MARKETPLACE & ADMIN
 // =============================================================================
-export async function listMarketplaceEvents({ q, category, format, sort = 'upcoming', page = 1, limit = 12 } = {}) {
+function filterAndSortMarketplaceItems(list, { price_type, sort }) {
+  let out = list
+  if (price_type === 'free') {
+    out = out.filter((evt) => (evt.ticket_types || []).some((t) => Number(t.price) === 0))
+  } else if (price_type === 'paid') {
+    out = out.filter((evt) => (evt.ticket_types || []).some((t) => Number(t.price) > 0))
+  }
+
+  if (sort === 'popular' || sort === 'most_registered') {
+    const soldOf = (e) => (e.ticket_types || []).reduce((s, t) => s + Number(t.sold_quantity || 0), 0)
+    return [...out].sort((a, b) => soldOf(b) - soldOf(a) || new Date(a.start_at) - new Date(b.start_at))
+  }
+  if (sort === 'newest') {
+    return [...out].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+  }
+  return [...out].sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
+}
+
+export async function listMarketplaceEvents({
+  q,
+  category,
+  format,
+  price_type,
+  location,
+  organizer,
+  date_from,
+  date_to,
+  sort = 'upcoming',
+  page = 1,
+  limit = 12
+} = {}) {
+  const p = Math.max(1, Number(page) || 1)
+  const l = Math.min(50, Math.max(1, Number(limit) || 12))
+
   if (!usePrisma()) {
-    let list = store.events.filter(
-      (e) => !e.deleted_at && e.publication_status === 'Published' && e.visibility === 'public'
-    )
+    let list = store.events
+      .filter(
+        (e) =>
+          !e.deleted_at &&
+          e.publication_status === 'Published' &&
+          e.status !== 'Cancelled' &&
+          e.visibility === 'public'
+      )
+      .map((evt) => ({
+        ...evt,
+        organization: store.organizations.find((o) => o.id === evt.organization_id),
+        ticket_types: store.ticketTypes.filter((t) => t.event_id === evt.id)
+      }))
+
     if (q) {
       const term = String(q).toLowerCase()
-      list = list.filter((e) => e.title.toLowerCase().includes(term) || (e.location_name || '').toLowerCase().includes(term))
+      list = list.filter(
+        (e) =>
+          e.title.toLowerCase().includes(term) ||
+          (e.location_name || '').toLowerCase().includes(term) ||
+          (e.description || '').toLowerCase().includes(term)
+      )
     }
     if (category) list = list.filter((e) => e.category === category)
     if (format) list = list.filter((e) => e.location_type === format)
-    if (sort === 'upcoming') list = [...list].sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
+    if (location) {
+      const loc = String(location).toLowerCase()
+      list = list.filter(
+        (e) =>
+          (e.location_name || '').toLowerCase().includes(loc) ||
+          (e.address || '').toLowerCase().includes(loc)
+      )
+    }
+    if (organizer) {
+      list = list.filter((e) => e.organization_id === organizer || e.organization?.slug === organizer)
+    }
+    if (date_from) list = list.filter((e) => String(e.start_at || '') >= String(date_from))
+    if (date_to) list = list.filter((e) => String(e.start_at || '').slice(0, 10) <= String(date_to))
 
-    const p = Number(page)
-    const l = Number(limit)
-    const items = list.slice((p - 1) * l, p * l).map((evt) => ({
-      ...evt,
-      organization: store.organizations.find((o) => o.id === evt.organization_id),
-      ticket_types: store.ticketTypes.filter((t) => t.event_id === evt.id)
-    }))
-    return { items, meta: { page: p, limit: l, total: list.length } }
+    list = filterAndSortMarketplaceItems(list, { price_type, sort })
+    const total = list.length
+    const total_pages = Math.max(1, Math.ceil(total / l))
+    const items = list.slice((p - 1) * l, p * l)
+    return { items, meta: { page: p, limit: l, total, total_pages } }
   }
 
   const where = {
     deleted_at: null,
     publication_status: 'Published',
+    status: { not: 'Cancelled' },
     visibility: 'public',
     ...(category ? { category } : {}),
     ...(format ? { location_type: format } : {}),
+    ...(location
+      ? {
+          OR: [
+            { location_name: { contains: String(location), mode: 'insensitive' } },
+            { address: { contains: String(location), mode: 'insensitive' } }
+          ]
+        }
+      : {}),
+    ...(organizer
+      ? {
+          OR: [{ organization_id: String(organizer) }, { organization: { slug: String(organizer) } }]
+        }
+      : {}),
+    ...(date_from || date_to
+      ? {
+          start_at: {
+            ...(date_from ? { gte: String(date_from) } : {}),
+            ...(date_to ? { lte: `${String(date_to).slice(0, 10)}T23:59:59Z` } : {})
+          }
+        }
+      : {}),
     ...(q
       ? {
           OR: [
             { title: { contains: String(q), mode: 'insensitive' } },
-            { location_name: { contains: String(q), mode: 'insensitive' } }
+            { location_name: { contains: String(q), mode: 'insensitive' } },
+            { description: { contains: String(q), mode: 'insensitive' } }
           ]
         }
       : {})
   }
-  const p = Number(page)
-  const l = Number(limit)
+
+  if (price_type || sort === 'popular' || sort === 'most_registered') {
+    const rows = await prisma.event.findMany({
+      where,
+      include: { organization: true, ticketTypes: true }
+    })
+    const formatted = filterAndSortMarketplaceItems(
+      rows.map((evt) => ({ ...formatPrismaEvent(evt), ticket_types: evt.ticketTypes })),
+      { price_type, sort }
+    )
+    const total = formatted.length
+    const total_pages = Math.max(1, Math.ceil(total / l))
+    return {
+      items: formatted.slice((p - 1) * l, p * l),
+      meta: { page: p, limit: l, total, total_pages }
+    }
+  }
+
   const [total, rows] = await Promise.all([
     prisma.event.count({ where }),
     prisma.event.findMany({
       where,
       include: { organization: true, ticketTypes: true },
-      orderBy: sort === 'upcoming' ? { start_at: 'asc' } : { created_at: 'desc' },
+      orderBy: sort === 'newest' ? { created_at: 'desc' } : { start_at: 'asc' },
       skip: (p - 1) * l,
       take: l
     })
   ])
+  const total_pages = Math.max(1, Math.ceil(total / l))
   return {
     items: rows.map((evt) => ({ ...formatPrismaEvent(evt), ticket_types: evt.ticketTypes })),
-    meta: { page: p, limit: l, total }
+    meta: { page: p, limit: l, total, total_pages }
   }
 }
 
 export async function listFeaturedMarketplaceEvents() {
   if (!usePrisma()) {
     return store.events
-      .filter((e) => !e.deleted_at && e.publication_status === 'Published' && e.visibility === 'public' && e.is_featured)
+      .filter(
+        (e) =>
+          !e.deleted_at &&
+          e.publication_status === 'Published' &&
+          e.status !== 'Cancelled' &&
+          e.visibility === 'public' &&
+          e.is_featured
+      )
       .map((evt) => ({
         ...evt,
         organization: store.organizations.find((o) => o.id === evt.organization_id),
@@ -2297,7 +3058,13 @@ export async function listFeaturedMarketplaceEvents() {
       }))
   }
   const rows = await prisma.event.findMany({
-    where: { deleted_at: null, publication_status: 'Published', visibility: 'public', is_featured: true },
+    where: {
+      deleted_at: null,
+      publication_status: 'Published',
+      status: { not: 'Cancelled' },
+      visibility: 'public',
+      is_featured: true
+    },
     include: { organization: true, ticketTypes: true }
   })
   return rows.map((evt) => ({ ...formatPrismaEvent(evt), ticket_types: evt.ticketTypes }))
@@ -2307,15 +3074,29 @@ export async function searchMarketplaceEvents(q) {
   if (!usePrisma()) {
     const term = String(q || '').toLowerCase()
     return store.events
-      .filter((e) => !e.deleted_at && e.publication_status === 'Published' && e.visibility === 'public')
-      .filter((e) => e.title.toLowerCase().includes(term))
+      .filter(
+        (e) =>
+          !e.deleted_at &&
+          e.publication_status === 'Published' &&
+          e.status !== 'Cancelled' &&
+          e.visibility === 'public'
+      )
+      .filter((e) => e.title.toLowerCase().includes(term) || (e.location_name || '').toLowerCase().includes(term))
   }
   const rows = await prisma.event.findMany({
     where: {
       deleted_at: null,
       publication_status: 'Published',
+      status: { not: 'Cancelled' },
       visibility: 'public',
-      ...(q ? { title: { contains: String(q), mode: 'insensitive' } } : {})
+      ...(q
+        ? {
+            OR: [
+              { title: { contains: String(q), mode: 'insensitive' } },
+              { location_name: { contains: String(q), mode: 'insensitive' } }
+            ]
+          }
+        : {})
     }
   })
   return rows.map((e) => formatPrismaEvent(e))
@@ -2328,7 +3109,9 @@ export async function listActiveCategories() {
 
 export async function listMarketplaceOrganizers() {
   if (!usePrisma()) {
-    const pubEvents = store.events.filter((e) => !e.deleted_at && e.publication_status === 'Published' && e.visibility === 'public')
+    const pubEvents = store.events.filter(
+      (e) => !e.deleted_at && e.publication_status === 'Published' && e.status !== 'Cancelled' && e.visibility === 'public'
+    )
     return store.organizations.map((org) => ({
       ...org,
       event_count: pubEvents.filter((e) => e.organization_id === org.id).length
@@ -2338,7 +3121,7 @@ export async function listMarketplaceOrganizers() {
     where: { deleted_at: null },
     include: {
       events: {
-        where: { deleted_at: null, publication_status: 'Published', visibility: 'public' },
+        where: { deleted_at: null, publication_status: 'Published', status: { not: 'Cancelled' }, visibility: 'public' },
         select: { id: true }
       }
     }
@@ -2349,14 +3132,37 @@ export async function listMarketplaceOrganizers() {
 export async function getPublicEventBySlugOrId(slug) {
   if (!usePrisma()) {
     const evt = store.events.find(
-      (e) => !e.deleted_at && e.publication_status === 'Published' && e.visibility === 'public' && (e.slug === slug || e.id === slug)
+      (e) =>
+        !e.deleted_at &&
+        e.publication_status === 'Published' &&
+        e.status !== 'Cancelled' &&
+        e.visibility === 'public' &&
+        (e.slug === slug || e.id === slug)
     )
     if (!evt) throw new AppError('Event tidak ditemukan di marketplace.', 404, 'EVENT_NOT_FOUND')
+    const subEvents = store.events
+      .filter(
+        (e) =>
+          !e.deleted_at &&
+          e.parent_event_id === evt.id &&
+          e.publication_status === 'Published' &&
+          e.status !== 'Cancelled'
+      )
+      .map((s) => ({
+        id: s.id,
+        title: s.title,
+        slug: s.slug,
+        start_at: s.start_at,
+        end_at: s.end_at,
+        location_name: s.location_name,
+        poster_url: s.poster_url
+      }))
     return {
       ...evt,
       organization: store.organizations.find((o) => o.id === evt.organization_id) || null,
       ticket_types: store.ticketTypes.filter((t) => t.event_id === evt.id && t.status !== 'Disabled'),
-      schedules: store.schedules.filter((s) => s.event_id === evt.id && s.visibility === 'public')
+      schedules: store.schedules.filter((s) => s.event_id === evt.id && s.visibility === 'public'),
+      sub_events: subEvents
     }
   }
 
@@ -2364,6 +3170,7 @@ export async function getPublicEventBySlugOrId(slug) {
     where: {
       deleted_at: null,
       publication_status: 'Published',
+      status: { not: 'Cancelled' },
       visibility: 'public',
       OR: [{ slug }, { id: slug }]
     },
@@ -2374,10 +3181,29 @@ export async function getPublicEventBySlugOrId(slug) {
     }
   })
   if (!evt) throw new AppError('Event tidak ditemukan di marketplace.', 404, 'EVENT_NOT_FOUND')
+  const subEvents = await prisma.event.findMany({
+    where: {
+      deleted_at: null,
+      parent_event_id: evt.id,
+      publication_status: 'Published',
+      status: { not: 'Cancelled' }
+    },
+    select: {
+      id: true,
+      title: true,
+      slug: true,
+      start_at: true,
+      end_at: true,
+      location_name: true,
+      poster_url: true
+    },
+    orderBy: { start_at: 'asc' }
+  })
   return {
     ...formatPrismaEvent(evt),
     ticket_types: evt.ticketTypes,
-    schedules: evt.schedules
+    schedules: evt.schedules,
+    sub_events: subEvents
   }
 }
 
@@ -2511,9 +3337,10 @@ export function evaluateOrganizerSubscription(organizer) {
 
 export async function listAdminUsers() {
   if (!usePrisma()) {
-    return store.users.map((u) =>
-      u.role === 'organizer' ? { ...u, subscription: evaluateOrganizerSubscription(u) } : u
-    )
+    return store.users.map((u) => {
+      const safe = sanitizeUser(u)
+      return safe.role === 'organizer' ? { ...safe, subscription: evaluateOrganizerSubscription(u) } : safe
+    })
   }
   const [customers, organizers, admins] = await Promise.all([
     prisma.customer.findMany({ orderBy: { created_at: 'desc' } }),
@@ -2521,12 +3348,12 @@ export async function listAdminUsers() {
     prisma.admin.findMany({ orderBy: { created_at: 'desc' } })
   ])
   return [
-    ...customers.map((u) => ({ ...u, role: 'customer' })),
+    ...customers.map((u) => sanitizeUser({ ...u, role: 'customer' })),
     ...organizers.map((u) => {
       const orgUser = { ...u, role: 'organizer' }
-      return { ...orgUser, subscription: evaluateOrganizerSubscription(orgUser) }
+      return { ...sanitizeUser(orgUser), subscription: evaluateOrganizerSubscription(orgUser) }
     }),
-    ...admins.map((u) => ({ ...u, role: 'admin' }))
+    ...admins.map((u) => sanitizeUser({ ...u, role: 'admin' }))
   ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 }
 
@@ -2625,7 +3452,7 @@ export async function updateAdminUserStatus(id, isSuspended) {
     const user = store.users.find((u) => u.id === id)
     if (!user) throw new AppError('User tidak ditemukan.', 404, 'USER_NOT_FOUND')
     user.is_suspended = Boolean(isSuspended)
-    return user
+    return sanitizeUser(user)
   }
   const existing = await findUserById(id)
   if (!existing) throw new AppError('User tidak ditemukan.', 404, 'USER_NOT_FOUND')
@@ -2633,7 +3460,7 @@ export async function updateAdminUserStatus(id, isSuspended) {
     where: { id },
     data: { is_suspended: Boolean(isSuspended) }
   })
-  return { ...updated, role: existing.role }
+  return sanitizeUser({ ...updated, role: existing.role })
 }
 
 export async function listAllOrganizations() {
@@ -2651,7 +3478,11 @@ export async function listVerifications() {
 }
 
 export async function reviewVerification(idOrOrgId, statusInput, notes, adminId) {
-  const status = statusInput === 'verified' ? 'verified' : 'rejected'
+  const status = ['verified', 'rejected', 'request_documents'].includes(statusInput)
+    ? statusInput
+    : 'rejected'
+  const orgStatus = status === 'request_documents' ? 'pending' : status
+
   if (!usePrisma()) {
     let ver = store.verifications.find((v) => v.id === idOrOrgId || v.organization_id === idOrOrgId)
     const org = store.organizations.find((o) => o.id === idOrOrgId || o.id === ver?.organization_id)
@@ -2664,11 +3495,29 @@ export async function reviewVerification(idOrOrgId, statusInput, notes, adminId)
     ver.review_notes = notes || ''
     ver.reviewed_by = adminId
     ver.reviewed_at = new Date().toISOString()
-    if (org) org.verification_status = status
+    if (org) {
+      org.verification_status = orgStatus
+      if (org.created_by) {
+        await createNotification({
+          user_id: org.created_by,
+          user_role: 'organizer',
+          title: `Verifikasi Organisasi: ${org.name}`,
+          message:
+            status === 'verified'
+              ? `Organisasi ${org.name} telah terverifikasi.`
+              : status === 'request_documents'
+                ? `Admin meminta kelengkapan dokumen untuk ${org.name}: ${notes || '-'}`
+                : `Verifikasi organisasi ${org.name} ditolak: ${notes || '-'}`,
+          type: status === 'verified' ? 'success' : 'warning',
+          reference_type: 'organization',
+          reference_id: org.id
+        })
+      }
+    }
     return { verification: ver, organization: org }
   }
 
-  return runTransaction(async (tx) => {
+  const out = await runTransaction(async (tx) => {
     let ver = await tx.organizerVerification.findFirst({
       where: { OR: [{ id: idOrOrgId }, { organization_id: idOrOrgId }] }
     })
@@ -2695,10 +3544,28 @@ export async function reviewVerification(idOrOrgId, statusInput, notes, adminId)
       })
     }
     const updatedOrg = org
-      ? await tx.organization.update({ where: { id: org.id }, data: { verification_status: status } })
+      ? await tx.organization.update({ where: { id: org.id }, data: { verification_status: orgStatus } })
       : null
     return { verification: ver, organization: updatedOrg }
   })
+
+  if (out.organization?.created_by) {
+    await createNotification({
+      user_id: out.organization.created_by,
+      user_role: 'organizer',
+      title: `Verifikasi Organisasi: ${out.organization.name}`,
+      message:
+        status === 'verified'
+          ? `Organisasi ${out.organization.name} telah terverifikasi.`
+          : status === 'request_documents'
+            ? `Admin meminta kelengkapan dokumen untuk ${out.organization.name}: ${notes || '-'}`
+            : `Verifikasi organisasi ${out.organization.name} ditolak: ${notes || '-'}`,
+      type: status === 'verified' ? 'success' : 'warning',
+      reference_type: 'organization',
+      reference_id: out.organization.id
+    })
+  }
+  return out
 }
 
 export async function listAdminEvents() {
@@ -2721,14 +3588,17 @@ export async function listAdminEvents() {
 
 export async function moderateEvent(eventId, action, adminId, notes = '') {
   const map = {
-    approve: { pub: 'Published', op: 'Published' },
-    reject: { pub: 'Rejected', op: null },
-    suspend: { pub: 'Suspended', op: null }
+    approve: { pub: 'Approved', label: 'disetujui (Approved)' },
+    request_revision: { pub: 'Revision Requested', label: 'diminta revisi' },
+    reject: { pub: 'Rejected', label: 'ditolak (Rejected)' },
+    suspend: { pub: 'Suspended', label: 'disuspend (Suspended)' }
   }
+  const entry = map[action]
+  if (!entry) throw new AppError('Aksi moderasi tidak valid.', 400, 'INVALID_ACTION')
+
   if (!usePrisma()) {
     const evt = store.getEvent(eventId)
-    evt.publication_status = map[action].pub
-    if (map[action].op) evt.status = map[action].op
+    evt.publication_status = entry.pub
     const log = {
       id: 'mod-' + Date.now(),
       event_id: evt.id,
@@ -2738,17 +3608,27 @@ export async function moderateEvent(eventId, action, adminId, notes = '') {
       created_at: new Date().toISOString()
     }
     store.moderationLogs.unshift(log)
+    if (evt.created_by) {
+      await createNotification({
+        user_id: evt.created_by,
+        user_role: 'organizer',
+        title: `Moderasi Event: ${evt.title}`,
+        message: `Event ${evt.title} telah ${entry.label}${notes ? `. Catatan: ${notes}` : '.'}`,
+        type: action === 'approve' ? 'success' : 'warning',
+        reference_type: 'event',
+        reference_id: evt.id
+      })
+    }
     return { event: evt, log }
   }
 
-  return runTransaction(async (tx) => {
+  const out = await runTransaction(async (tx) => {
     const existing = await tx.event.findFirst({ where: { id: eventId, deleted_at: null } })
     if (!existing) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
     const event = await tx.event.update({
       where: { id: eventId },
       data: {
-        publication_status: map[action].pub,
-        status: map[action].op || existing.status
+        publication_status: entry.pub
       }
     })
     const log = await tx.eventModerationLog.create({
@@ -2756,11 +3636,44 @@ export async function moderateEvent(eventId, action, adminId, notes = '') {
     })
     return { event: formatPrismaEvent(event), log }
   })
+
+  if (out.event?.created_by) {
+    await createNotification({
+      user_id: out.event.created_by,
+      user_role: 'organizer',
+      title: `Moderasi Event: ${out.event.title}`,
+      message: `Event ${out.event.title} telah ${entry.label}${notes ? `. Catatan: ${notes}` : '.'}`,
+      type: action === 'approve' ? 'success' : 'warning',
+      reference_type: 'event',
+      reference_id: out.event.id
+    })
+  }
+  return out
 }
 
 export async function listModerationLogs() {
   if (!usePrisma()) return store.moderationLogs
   return prisma.eventModerationLog.findMany({ orderBy: { created_at: 'desc' } })
+}
+
+export async function listAdminOrders() {
+  if (!usePrisma()) {
+    return store.orders.slice(0, 200).map((ord) => {
+      const evt = store.events.find((e) => e.id === ord.event_id)
+      return { ...ord, event_title: evt?.title || ord.event_id }
+    })
+  }
+  const orders = await prisma.order.findMany({
+    orderBy: { created_at: 'desc' },
+    take: 200,
+    include: { event: { select: { title: true } } }
+  })
+  return orders.map((ord) => ({ ...ord, event_title: ord.event?.title || ord.event_id }))
+}
+
+export async function listAdminActivityLogs() {
+  if (!usePrisma()) return store.activityLogs.slice(0, 200)
+  return prisma.activityLog.findMany({ orderBy: { created_at: 'desc' }, take: 200 })
 }
 
 export async function listAllCategories() {
@@ -2839,8 +3752,14 @@ async function ensureCustomerProfileForForum(user, client = prisma) {
 
 export async function listEventCompanionPosts(slugOrId) {
   if (!usePrisma()) {
-    const evt = store.events.find((e) => !e.deleted_at && (e.slug === slugOrId || e.id === slugOrId))
-    if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+    const evt = store.events.find(
+      (e) =>
+        !e.deleted_at &&
+        e.publication_status === 'Published' &&
+        e.status !== 'Cancelled' &&
+        (e.slug === slugOrId || e.id === slugOrId)
+    )
+    if (!evt) throw new AppError('Event tidak ditemukan atau belum dipublikasikan.', 404, 'EVENT_NOT_FOUND')
 
     const ticketHolderIds = new Set(
       store.orders
@@ -2878,10 +3797,15 @@ export async function listEventCompanionPosts(slugOrId) {
   }
 
   const evt = await prisma.event.findFirst({
-    where: { deleted_at: null, OR: [{ slug: slugOrId }, { id: slugOrId }] },
+    where: {
+      deleted_at: null,
+      publication_status: 'Published',
+      status: { not: 'Cancelled' },
+      OR: [{ slug: slugOrId }, { id: slugOrId }]
+    },
     select: { id: true }
   })
-  if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+  if (!evt) throw new AppError('Event tidak ditemukan atau belum dipublikasikan.', 404, 'EVENT_NOT_FOUND')
 
   const [posts, paidOrders, participants] = await Promise.all([
     prisma.eventCompanionPost.findMany({
@@ -2947,8 +3871,14 @@ export async function listEventCompanionPosts(slugOrId) {
 
 export async function createEventCompanionPost(slugOrId, user, payload) {
   if (!usePrisma()) {
-    const evt = store.events.find((e) => !e.deleted_at && (e.slug === slugOrId || e.id === slugOrId))
-    if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+    const evt = store.events.find(
+      (e) =>
+        !e.deleted_at &&
+        e.publication_status === 'Published' &&
+        e.status !== 'Cancelled' &&
+        (e.slug === slugOrId || e.id === slugOrId)
+    )
+    if (!evt) throw new AppError('Event tidak ditemukan atau belum dipublikasikan.', 404, 'EVENT_NOT_FOUND')
     const now = new Date().toISOString()
     const post = {
       id: 'cmp-' + Date.now(),
@@ -2972,10 +3902,15 @@ export async function createEventCompanionPost(slugOrId, user, payload) {
   }
 
   const evt = await prisma.event.findFirst({
-    where: { deleted_at: null, OR: [{ slug: slugOrId }, { id: slugOrId }] },
+    where: {
+      deleted_at: null,
+      publication_status: 'Published',
+      status: { not: 'Cancelled' },
+      OR: [{ slug: slugOrId }, { id: slugOrId }]
+    },
     select: { id: true }
   })
-  if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
+  if (!evt) throw new AppError('Event tidak ditemukan atau belum dipublikasikan.', 404, 'EVENT_NOT_FOUND')
 
   const customer = await ensureCustomerProfileForForum(user)
   const created = await prisma.eventCompanionPost.create({

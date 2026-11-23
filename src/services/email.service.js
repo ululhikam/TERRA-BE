@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js'
 import { AppError } from '../utils/response.js'
 import {
   buildTicketQrPayload,
+  createEmailPreviewToken,
   createQrDownloadToken,
   generateTicketQrBuffer,
   generateTicketQrDataUrl
@@ -313,8 +314,9 @@ export async function sendTicketOrderEmail({
   })
 
   const emailId = `eml-${Date.now()}`
+  const previewToken = createEmailPreviewToken(emailId)
   const subject = `[TERRA] QR Tiket Anda: ${eventTitle} (${orderNumber})`
-  const previewUrl = `${env.appBaseUrl}/api/v1/emails/${emailId}/preview`
+  const previewUrl = `${env.appBaseUrl}/api/v1/emails/${emailId}/preview?token=${previewToken}`
   const pdfFilename = `tiket-qr-${orderNumber}.pdf`
 
   const delivery = await sendEmail({
@@ -359,11 +361,11 @@ export async function sendTicketOrderEmail({
     pdf_download_url: orderPdfUrl,
     preview_url: previewUrl,
     mode,
+    delivered_by_provider: Boolean(delivery.sent),
     sent_at: new Date().toISOString()
   }
 
-  store.emailOutbox = store.emailOutbox || []
-  store.emailOutbox.unshift(outboxEntry)
+  store.emailOutbox = [outboxEntry, ...(store.emailOutbox || [])].slice(0, 100)
 
   logger.info('Ticket QR email processed', {
     emailId,
@@ -374,7 +376,8 @@ export async function sendTicketOrderEmail({
   })
 
   return {
-    sent: true,
+    sent: Boolean(delivery.sent || mode === 'local-outbox'),
+    delivered_by_provider: Boolean(delivery.sent),
     id: emailId,
     provider_id: delivery.id || null,
     mode,

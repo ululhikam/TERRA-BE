@@ -166,12 +166,14 @@ export async function seedDemafestPlan(prisma) {
   const demafestEvents = [
     {
       id: 'evt-demafest-2026',
+      parent_event_id: null,
+      theme_color: '#1e3a8a',
       title: 'DEMAFEST 2026: Dewantara Muda Festival — Resonansi Dewantara',
       slug: 'demafest-2026-resonansi-dewantara',
       category_id: 'cat-5',
       category: 'Komunitas & Sosial',
       description:
-        'Puncak rangkaian program kerja kolaboratif seluruh kementerian BEM Universitas Sarjanawiyata Tamansiswa (UST). Mengusung tema "Resonansi Dewantara" dengan tagline: Merawat Gagasan, Menggerakkan Perubahan, Merayakan Karya. Terdiri dari 5 agenda utama: Dewantara Public Forum (Pendidikan Merdeka, Mahasiswa Berdaya), Tamansiswa Heritage Expo, Dewantara Achievement Awards, Ormawa Performance & Showcase, serta Dewantara Celebration.',
+        'Puncak rangkaian program kerja kolaboratif seluruh kementerian BEM Universitas Sarjanawiyata Tamansiswa (UST). Tema: "Resonansi Dewantara — Merawat Gagasan, Menggerakkan Perubahan, Merayakan Karya". Filosofi utama ("Nyalakan Karya, Satukan Arah"): (1) Menghidupkan kembali nilai ajaran Ki Hadjar Dewantara (Ing Ngarsa Sung Tuladha, Ing Madya Mangun Karsa, Tut Wuri Handayani); (2) Mendorong kolaborasi lintas fakultas & himpunan; (3) Menyediakan ruang ekspresi intelektual, seni, dan kreativitas; (4) Mewujudkan transparansi serta akuntabilitas program kerja BEM UST; (5) Mengangkat citra positif UST di ruang publik. Agenda inti: Dewantara Public Forum, Tamansiswa Heritage Expo (10 booth: Pojok Sejarah UST, Booth MENLU/Dewa Connect, MENPORA, KASTRAT, Advokasi, MENDAGRI, Kolaborasi UKM, Pameran Karya Mahasiswa, Pojok Baca & Interaktif, Booth Sponsor/Dewa Berbagi), Dewantara Achievement Awards, Ormawa Performance & Showcase, serta Dewantara Celebration.',
       poster_url: 'https://images.unsplash.com/photo-1523580494863-6f3031224c94?w=900&q=80',
       banner_url: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=1400&q=80',
       location_type: 'offline',
@@ -210,32 +212,34 @@ export async function seedDemafestPlan(prisma) {
         }
       ],
       schedules: [
-        ['07:00', '08:00', 'Persiapan Panitia', 'Sterilisasi dan pengecekan venue seluruh zona', 'Divisi Keamanan & Perlengkapan'],
-        ['08:00', '08:30', 'Registrasi Peserta', 'Registrasi tamu undangan dan mahasiswa + Pembukaan Booth Tamansiswa Heritage Expo', 'Divisi Humas & Acara'],
-        ['08:30', '09:00', 'Opening Ceremony', 'Pembukaan resmi DEMAFEST 2026 — Resonansi Dewantara', 'Divisi Acara'],
-        ['09:00', '09:15', 'Sambutan Ketua BEM & Pimpinan Universitas', 'Sambutan Ketua BEM UST & Rektorat', 'Bestan Dhya Ul Haq'],
-        ['09:15', '09:30', 'Pembukaan Tamansiswa Heritage Expo', 'Resmi membuka pameran sejarah & hasil proker 5 kementerian BEM', 'Panitia Inti'],
-        ['09:30', '11:30', 'Dewantara Public Forum (Auditorium)', 'Seminar Pendidikan Merdeka: Moderator (09.30), Narasumber I (09.50), Narasumber II (10.30), Diskusi & Kesimpulan (11.00–11.30)', 'Kementerian KASTRAT'],
-        ['11:30', '12:30', 'ISHOMA', 'Istirahat, sholat, makan siang & kunjungan booth Expo', 'All Panitia'],
-        ['12:30', '13:00', 'Pengantar Penghargaan', 'Profil nominasi mahasiswa & ormawa berprestasi', 'Divisi Acara'],
-        ['13:00', '14:00', 'Dewantara Achievement Awards', 'Penyerahan penghargaan 6 kategori akademik, nonakademik, olahraga, seni, kontribusi & ormawa terinspiratif', 'Divisi Acara'],
-        ['14:00', '15:30', 'Ormawa Performance I', 'Pembukaan showcase (14.00), UKM Seni (14.15), Penampilan Musik (14.35), Penampilan Tari (14.55)', 'Kementerian MENDAGRI'],
-        ['15:30', '16:00', 'Break Sore', 'Persiapan teknis sesi kedua & kunjungan Tamansiswa Expo', 'Divisi Perlengkapan'],
-        ['16:00', '17:30', 'Ormawa Performance II', 'Penampilan Teater (16.00), Musik (16.20), Penampilan Organisasi (16.40), Kolaborasi Seluruh Ormawa (17.00)', 'Kementerian MENDAGRI'],
-        ['17:30', '18:30', 'ISHOMA Malam', 'Istirahat & persiapan Dewantara Celebration', 'All Panitia'],
-        ['18:30', '19:00', 'Closing Ceremony', 'Penutupan formal rangkaian DEMAFEST 2026', 'Panitia Inti'],
-        ['19:00', '20:30', 'Dewantara Celebration', 'Hiburan malam puncak & apresiasi kolaborasi mahasiswa', 'Divisi Acara & PDD'],
-        ['20:30', '21:00', 'Dokumentasi & Penutupan', 'Foto bersama panitia/pengisi acara dan pembongkaran booth Expo', 'Divisi PDD & Perlengkapan']
+        { start: '07:00', end: '07:30', track: 'All Area', location: 'Seluruh Zona Venue UST', title: '1-2. Kedatangan Panitia, Briefing Awal & Pengecekan Venue', description: 'Absensi panitia inti & divisi, pembagian HT, sterilisasi Auditorium, Area Expo, dan Panggung Utama.', pic: 'Divisi Keamanan & Perlengkapan' },
+        { start: '07:30', end: '08:00', track: 'All Area', location: 'Lobby Auditorium & Area Expo', title: '3-4. Pengecekan Audio, Lighting & Finalisasi Kesiapan Acara', description: 'Soundcheck Auditorium & Panggung Utama, cek LCD materi Public Forum, dan kesiapan 10 booth Expo.', pic: 'Divisi Acara & Perlengkapan' },
+        { start: '08:00', end: '08:30', track: 'Lobby & Expo', location: 'Foyer Auditorium & Area Expo', title: '5-6. Registrasi Tamu Undangan/Peserta & Pembukaan 10 Booth Tamansiswa Expo', description: 'Scan QR check-in peserta serta pembukaan 10 booth: Pojok Sejarah UST, Booth 5 Kementerian, UKM, Karya Mahasiswa, Pojok Baca, Sponsor & Dewa Connect/Dewa Berbagi.', pic: 'Divisi Humas & Acara' },
+        { start: '08:30', end: '09:00', track: 'Main Stage', location: 'Auditorium UST Yogyakarta', title: '7-9. Opening Ceremony (Pembukaan MC, Indonesia Raya, Hymne UST & Laporan Ketua Panitia)', description: 'Pembukaan resmi DEMAFEST 2026 oleh MC, menyanyikan Indonesia Raya & Mars/Hymne UST, dan laporan Ketua Panitia Bestan Dhya Ul Haq.', pic: 'Bestan Dhya Ul Haq & Divisi Acara' },
+        { start: '09:00', end: '09:30', track: 'Main Stage', location: 'Auditorium UST Yogyakarta', title: '10-12. Sambutan Ketua BEM, Pimpinan Universitas & Peresmian Tamansiswa Heritage Expo', description: 'Sambutan resmi Ketua BEM UST & Pimpinan Rektorat dilanjutkan seremoni pembukaan pameran sejarah & proker kementerian.', pic: 'Panitia Inti' },
+        { start: '09:30', end: '10:30', track: 'Auditorium', location: 'Auditorium UST Yogyakarta', title: '13-15. Dewantara Public Forum Sesi I (Moderator & Narasumber I Pendidikan Merdeka)', description: 'Pengantar moderator (09:30), paparan Narasumber I mengenai relevansi pemikiran Ki Hadjar Dewantara & Pendidikan Merdeka (09:50–10:30).', pic: 'Kementerian KASTRAT' },
+        { start: '10:30', end: '11:30', track: 'Auditorium', location: 'Auditorium UST Yogyakarta', title: '16-18. Dewantara Public Forum Sesi II (Narasumber II, Tanya Jawab & Pleno Rekomendasi)', description: 'Paparan Narasumber II Mahasiswa Berdaya (10:30), diskusi interaktif audiens (11:00), dan penyerahan dokumen Suara Mahasiswa & rekomendasi KASTRAT.', pic: 'Kementerian KASTRAT & Advokasi' },
+        { start: '11:30', end: '12:30', track: 'Area Expo', location: 'Area Expo & Masjid Kampus', title: '19. ISHOMA & Kunjungan Tamansiswa Heritage Expo', description: 'Istirahat, sholat, makan siang, serta kunjungan interaktif booth proker 5 kementerian & Dewa Connect.', pic: 'All Panitia' },
+        { start: '12:30', end: '13:00', track: 'Auditorium', location: 'Auditorium UST Yogyakarta', title: '20. Pengantar & Pemutaran Profil Nominasi Dewantara Achievement Awards', description: 'Penayangan profil nominator mahasiswa dan ormawa berprestasi UST.', pic: 'Divisi Acara & PDD' },
+        { start: '13:00', end: '14:00', track: 'Auditorium', location: 'Auditorium UST Yogyakarta', title: '21. Penganugerahan Dewantara Achievement Awards (6 Kategori)', description: 'Penyerahan trofi & piagam untuk 6 kategori: Akademik, Nonakademik, Olahraga, Seni, Kontribusi Mahasiswa, dan Ormawa Terinspiratif.', pic: 'Divisi Acara' },
+        { start: '14:00', end: '15:30', track: 'Panggung Utama', location: 'Panggung Utama Kampus Pusat UST', title: '22-23. Ormawa Performance & Showcase Sesi I (UKM Seni, Musik & Tari)', description: 'Pembukaan showcase (14:00), penampilan UKM Seni (14:15), Musik Mahasiswa (14:35), dan Seni Tari Tradisional/Kontemporer (14:55).', pic: 'Kementerian MENDAGRI' },
+        { start: '15:30', end: '16:00', track: 'Area Expo', location: 'Area Expo & Panggung Utama', title: '24. Break Sore & Kunjungan Expo', description: 'Persiapan teknis penampilan sore & penjurian karya di Area Expo.', pic: 'Divisi Perlengkapan' },
+        { start: '16:00', end: '17:30', track: 'Panggung Utama', location: 'Panggung Utama Kampus Pusat UST', title: '25. Ormawa Performance & Showcase Sesi II (Teater, Musik, Ormawa & Kolaborasi)', description: 'Penampilan Teater (16:00), Musik (16:20), Parade Organisasi (16:40), dan Kolaborasi Akbar Seluruh Ormawa UST (17:00).', pic: 'Kementerian MENDAGRI' },
+        { start: '17:30', end: '18:30', track: 'All Area', location: 'Kampus Pusat UST', title: '26. ISHOMA Malam & Persiapan Dewantara Celebration', description: 'Istirahat maghrib, tata ulang tata cahaya panggung malam & briefing penutupan.', pic: 'All Panitia' },
+        { start: '18:30', end: '20:30', track: 'Panggung Utama', location: 'Panggung Utama Kampus Pusat UST', title: '27. Closing Ceremony & Dewantara Celebration (Malam Puncak)', description: 'Penutupan formal DEMAFEST 2026 (18:30) disambung konser hiburan malam puncak & apresiasi kolaborasi mahasiswa (19:00–20:30).', pic: 'Divisi Acara & PDD' },
+        { start: '20:30', end: '21:00', track: 'All Area', location: 'Kampus Pusat UST', title: '28. Foto Bersama, Dokumentasi Akhir & Pembongkaran Expo', description: 'Dokumentasi seluruh panitia, pengisi acara, pengecekan inventaris venue, dan pembersihan area.', pic: 'Divisi PDD & Perlengkapan' }
       ]
     },
     {
       id: 'evt-demafest-dewa-connect',
+      parent_event_id: 'evt-demafest-2026',
+      theme_color: '#1e3a8a',
       title: 'Pre-Event MENLU: Dewa Connect — Building Bridges, Expanding Horizons',
       slug: 'demafest-pre-event-dewa-connect',
       category_id: 'cat-4',
       category: 'Bisnis & Karir',
       description:
-        'Program kerja Kementerian Luar Negeri (MENLU) BEM UST: Kunjungan / studi banding dengan BEM universitas mitra untuk bertukar gagasan tata kelola organisasi, strategi advokasi mahasiswa, pengelolaan program kerja, serta pengembangan relasi antarlembaga.',
+        'Program kerja Kementerian Luar Negeri (MENLU) BEM UST: Kunjungan / studi banding dengan BEM universitas mitra untuk bertukar gagasan tata kelola organisasi, strategi advokasi mahasiswa, pengelolaan program kerja, serta pengembangan relasi antarlembaga (termasuk inisiatif jejaring Dewa Berbagi / Dewa Connect).',
       poster_url: 'https://images.unsplash.com/photo-1515187029135-18ee286d815b?w=900&q=80',
       banner_url: 'https://images.unsplash.com/photo-1515187029135-18ee286d815b?w=1400&q=80',
       location_type: 'offline',
@@ -249,25 +253,27 @@ export async function seedDemafestPlan(prisma) {
       is_featured: false,
       speakers: [],
       schedules: [
-        ['07:00', '08:00', 'Persiapan dan keberangkatan', 'Briefing delegasi BEM UST', 'MENLU'],
-        ['08:00', '09:00', 'Perjalanan menuju kampus mitra', 'Koordinasi kedatangan', 'MENLU'],
-        ['09:00', '09:30', 'Penyambutan dan pembukaan', 'Sambutan BEM UST & BEM Mitra', 'MENLU'],
-        ['09:30', '10:00', 'Presentasi profil organisasi', 'Pengenalan struktur & visi misi', 'MENLU'],
-        ['10:00', '11:30', 'Forum diskusi dan sharing', 'Tata kelola organisasi & advokasi mahasiswa', 'MENLU'],
-        ['11:30', '12:30', 'ISHOMA', 'Istirahat & makan siang bersama', 'Panitia'],
-        ['12:30', '13:30', 'Diskusi program unggulan', 'Relasi antarlembaga & inovasi proker', 'MENLU'],
-        ['13:30', '14:00', 'Penyerahan cenderamata', 'Plakat resmi BEM UST', 'Humas & MENLU'],
-        ['14:00', '15:00', 'Dokumentasi & penutupan', 'Penyusunan notulensi & kepulangan', 'PDD & MENLU']
+        { start: '07:00', end: '08:00', track: 'Delegasi', title: 'Persiapan dan keberangkatan', description: 'Briefing delegasi BEM UST', pic: 'MENLU' },
+        { start: '08:00', end: '09:00', track: 'Transit', title: 'Perjalanan menuju kampus mitra', description: 'Koordinasi kedatangan', pic: 'MENLU' },
+        { start: '09:00', end: '09:30', track: 'Aula Mitra', title: 'Penyambutan dan pembukaan', description: 'Sambutan BEM UST & BEM Mitra', pic: 'MENLU' },
+        { start: '09:30', end: '10:00', track: 'Aula Mitra', title: 'Presentasi profil organisasi', description: 'Pengenalan struktur & visi misi', pic: 'MENLU' },
+        { start: '10:00', end: '11:30', track: 'Forum Diskusi', title: 'Forum diskusi dan sharing', description: 'Tata kelola organisasi & advokasi mahasiswa', pic: 'MENLU' },
+        { start: '11:30', end: '12:30', track: 'Istirahat', title: 'ISHOMA', description: 'Istirahat & makan siang bersama', pic: 'Panitia' },
+        { start: '12:30', end: '13:30', track: 'Forum Diskusi', title: 'Diskusi program unggulan', description: 'Relasi antarlembaga & inovasi proker', pic: 'MENLU' },
+        { start: '13:30', end: '14:00', track: 'Aula Mitra', title: 'Penyerahan cenderamata', description: 'Plakat resmi BEM UST', pic: 'Humas & MENLU' },
+        { start: '14:00', end: '15:00', track: 'Aula Mitra', title: 'Dokumentasi & penutupan', description: 'Penyusunan notulensi & kepulangan', pic: 'PDD & MENLU' }
       ]
     },
     {
       id: 'evt-demafest-badminton',
+      parent_event_id: 'evt-demafest-2026',
+      theme_color: '#1e3a8a',
       title: 'Pre-Event MENPORA: Dewantara Badminton Cup',
       slug: 'demafest-pre-event-dewantara-badminton-cup',
       category_id: 'cat-5',
       category: 'Komunitas & Sosial',
       description:
-        'Program kerja Kementerian Pemuda dan Olahraga (MENPORA) BEM UST dengan tema "One Court, One Spirit, One Victory". Turnamen badminton antarmahasiswa UST kategori Ganda Putra, Ganda Putri, dan Ganda Campuran.',
+        'Program kerja Kementerian Pemuda dan Olahraga (MENPORA) BEM UST dengan tema "One Court, One Spirit, One Victory". Turnamen badminton antarmahasiswa UST dalam 3 kategori resmi: Ganda Putra, Ganda Putri, dan Ganda Campuran (sistem gugur).',
       poster_url: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=900&q=80',
       banner_url: 'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=1400&q=80',
       location_type: 'offline',
@@ -281,24 +287,26 @@ export async function seedDemafestPlan(prisma) {
       is_featured: false,
       speakers: [],
       schedules: [
-        ['07:00', '08:00', 'Registrasi peserta turnamen', 'Verifikasi tim ganda putra, putri & campuran', 'MENPORA'],
-        ['08:00', '08:20', 'Pembukaan', 'Pembukaan resmi Dewantara Badminton Cup', 'MENPORA'],
-        ['08:20', '08:40', 'Technical meeting singkat', 'Sistem gugur & pembagian lapangan', 'Wasit & MENPORA'],
-        ['08:40', '12:00', 'Babak penyisihan', 'Pertandingan paralel kategori ganda', 'MENPORA'],
-        ['12:00', '13:00', 'ISHOMA', 'Istirahat siang', 'Panitia'],
-        ['13:00', '15:00', 'Babak Semifinal', 'Penentuan finalis terbaik', 'MENPORA'],
-        ['15:00', '16:30', 'Babak Final', 'Perebutan Juara 1, 2, dan 3', 'MENPORA'],
-        ['16:30', '17:00', 'Penyerahan hadiah dan penutupan', 'Apresiasi juara & dokumentasi kompetisi', 'PDD & MENPORA']
+        { start: '07:00', end: '08:00', track: 'GOR Utama', title: 'Registrasi peserta turnamen', description: 'Verifikasi tim Ganda Putra, Ganda Putri & Ganda Campuran', pic: 'MENPORA' },
+        { start: '08:00', end: '08:20', track: 'GOR Utama', title: 'Pembukaan', description: 'Pembukaan resmi Dewantara Badminton Cup', pic: 'MENPORA' },
+        { start: '08:20', end: '08:40', track: 'GOR Utama', title: 'Technical meeting singkat', description: 'Sistem gugur & pembagian lapangan (Court 1-3)', pic: 'Wasit & MENPORA' },
+        { start: '08:40', end: '12:00', track: 'Court 1-3', title: 'Babak penyisihan', description: 'Pertandingan paralel Ganda Putra, Ganda Putri & Ganda Campuran', pic: 'MENPORA' },
+        { start: '12:00', end: '13:00', track: 'Istirahat', title: 'ISHOMA', description: 'Istirahat siang', pic: 'Panitia' },
+        { start: '13:00', end: '15:00', track: 'Court 1-2', title: 'Babak Semifinal', description: 'Penentuan finalis terbaik tiap kategori ganda', pic: 'MENPORA' },
+        { start: '15:00', end: '16:30', track: 'Court 1', title: 'Babak Final', description: 'Perebutan Juara 1, 2, dan 3 semua kategori ganda', pic: 'MENPORA' },
+        { start: '16:30', end: '17:00', track: 'GOR Utama', title: 'Penyerahan hadiah dan penutupan', description: 'Apresiasi juara & dokumentasi kompetisi', pic: 'PDD & MENPORA' }
       ]
     },
     {
       id: 'evt-demafest-critical-space',
+      parent_event_id: 'evt-demafest-2026',
+      theme_color: '#1e3a8a',
       title: 'Pre-Event KASTRAT: Dewantara Critical Space',
       slug: 'demafest-pre-event-dewantara-critical-space',
       category_id: 'cat-3',
       category: 'Workshop & Edukasi',
       description:
-        'Program kerja Kementerian Kajian dan Strategi (KASTRAT): Forum kajian dan diskusi kritis bertema "Mahasiswa sebagai Subjek Kritis dalam Mengawal Kebijakan Publik" (akses pendidikan tinggi, demokrasi kampus, dan pemikiran Ki Hadjar Dewantara).',
+        'Program kerja Kementerian Kajian dan Strategi (KASTRAT): Forum kajian & diskusi kritis bertema "Mahasiswa sebagai Subjek Kritis dalam Mengawal Kebijakan Publik". Fokus 4 topik kajian: (1) Akses & keadilan pendidikan tinggi; (2) Demokrasi & partisipasi mahasiswa di kampus; (3) Relevansi pemikiran Ki Hadjar Dewantara pada isu kontemporer; (4) Kebijakan sosial yang berdampak pada generasi muda.',
       poster_url: 'https://images.unsplash.com/photo-1475721027785-f74eccf877e2?w=900&q=80',
       banner_url: 'https://images.unsplash.com/photo-1475721027785-f74eccf877e2?w=1400&q=80',
       location_type: 'offline',
@@ -312,23 +320,25 @@ export async function seedDemafestPlan(prisma) {
       is_featured: false,
       speakers: [],
       schedules: [
-        ['13:00', '13:30', 'Registrasi peserta diskusi', 'Pendataan peserta forum kajian', 'KASTRAT'],
-        ['13:30', '13:45', 'Pembukaan', 'Pengantar tema Mahasiswa sebagai Subjek Kritis', 'KASTRAT'],
-        ['13:45', '14:15', 'Pemaparan isu & pengantar kajian', 'Bedah kebijakan publik & pemikiran Ki Hadjar Dewantara', 'KASTRAT'],
-        ['14:15', '15:15', 'Diskusi kelompok terarah', '4 kelompok topik pendidikan & demokrasi kampus', 'Moderator'],
-        ['15:15', '15:45', 'Presentasi hasil kajian', 'Pemaparan rekomendasi tiap kelompok', 'KASTRAT'],
-        ['15:45', '16:15', 'Tanggapan & penyusunan rekomendasi', 'Finalisasi naskah kajian untuk forum DEMAFEST 10 Des', 'KASTRAT'],
-        ['16:15', '16:30', 'Penutupan', 'Dokumentasi hasil kajian', 'PDD']
+        { start: '13:00', end: '13:30', track: 'Foyer Ruang Diskusi', title: 'Registrasi peserta diskusi', description: 'Pendataan peserta forum kajian & pembagian kelompok topik 1–4', pic: 'KASTRAT' },
+        { start: '13:30', end: '13:45', track: 'Ruang Diskusi', title: 'Pembukaan', description: 'Pengantar tema Mahasiswa sebagai Subjek Kritis', pic: 'KASTRAT' },
+        { start: '13:45', end: '14:15', track: 'Ruang Diskusi', title: 'Pemaparan isu & pengantar kajian', description: 'Bedah kebijakan publik, keadilan pendidikan, demokrasi kampus & pemikiran Ki Hadjar Dewantara', pic: 'KASTRAT' },
+        { start: '14:15', end: '15:15', track: 'Kelompok 1–4', title: 'Diskusi kelompok terarah (4 Topik)', description: 'Topik 1: Akses pendidikan tinggi; Topik 2: Demokrasi kampus; Topik 3: Relevansi ajaran Ki Hadjar Dewantara; Topik 4: Kebijakan sosial generasi muda', pic: 'Moderator' },
+        { start: '15:15', end: '15:45', track: 'Ruang Diskusi', title: 'Presentasi hasil kajian', description: 'Pemaparan rekomendasi tiap kelompok topik 1–4', pic: 'KASTRAT' },
+        { start: '15:45', end: '16:15', track: 'Ruang Diskusi', title: 'Tanggapan & penyusunan rekomendasi', description: 'Finalisasi naskah kajian untuk forum DEMAFEST 10 Des', pic: 'KASTRAT' },
+        { start: '16:15', end: '16:30', track: 'Ruang Diskusi', title: 'Penutupan', description: 'Dokumentasi hasil kajian', pic: 'PDD' }
       ]
     },
     {
       id: 'evt-demafest-suara-mahasiswa',
+      parent_event_id: 'evt-demafest-2026',
+      theme_color: '#1e3a8a',
       title: 'Pre-Event Advokasi: Suara Mahasiswa — Posko Aspirasi UST',
       slug: 'demafest-pre-event-suara-mahasiswa',
       category_id: 'cat-5',
       category: 'Komunitas & Sosial',
       description:
-        'Program kerja Kementerian Advokasi bertema "Mendengar Aspirasi, Mengawal Hak, Mewujudkan Keadilan". Membuka posko aspirasi, survei permasalahan mahasiswa, konsultasi & pendampingan, hingga penyusunan dokumen aspirasi untuk disampaikan di Public Forum 10 Desember 2026.',
+        'Program kerja Kementerian Advokasi bertema "Mendengar Aspirasi, Mengawal Hak, Mewujudkan Keadilan". Membuka posko aspirasi 3 hari (3–5 Desember 2026), survei permasalahan mahasiswa (akademik, fasilitas, layanan kampus, UKT/kesejahteraan), konsultasi & pendampingan, hingga penyusunan dokumen aspirasi untuk disampaikan di Public Forum 10 Desember 2026.',
       poster_url: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=900&q=80',
       banner_url: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=1400&q=80',
       location_type: 'offline',
@@ -342,17 +352,18 @@ export async function seedDemafestPlan(prisma) {
       is_featured: false,
       speakers: [],
       schedules: [
-        ['09:00', '09:30', 'Persiapan posko aspirasi', 'Penataan meja konsultasi & formulir survei', 'Advokasi'],
-        ['09:30', '10:00', 'Pembukaan posko aspirasi', 'Sesi pembukaan layanan aspirasi akademik & nonakademik', 'Advokasi'],
-        ['10:00', '12:00', 'Pengumpulan aspirasi mahasiswa', 'Pengisian survei & pengaduan langsung mahasiswa', 'Advokasi'],
-        ['12:00', '13:00', 'ISHOMA', 'Istirahat siang', 'Panitia'],
-        ['13:00', '14:00', 'Konsultasi & klasifikasi aspirasi', 'Pendampingan & pemetaan isu prioritas', 'Advokasi'],
-        ['14:00', '15:00', 'Penyusunan laporan hasil aspirasi', 'Kompilasi dokumen aspirasi untuk DEMAFEST 10 Des', 'Advokasi'],
-        ['15:00', '15:30', 'Publikasi hasil awal', 'Rilis ringkasan suara mahasiswa', 'PDD & Advokasi']
+        { date: '2026-12-03', start: '09:00', end: '10:00', track: 'Hari 1 — Pembukaan Posko', title: 'Hari 1: Persiapan & Pembukaan Posko Aspirasi', description: 'Penataan meja konsultasi, formulir survei digital, dan seremoni pembukaan layanan aspirasi akademik & nonakademik.', pic: 'Advokasi' },
+        { date: '2026-12-03', start: '10:00', end: '15:30', track: 'Hari 1 — Posko Utama', title: 'Hari 1: Pengumpulan Aspirasi & Pengaduan Awal', description: 'Penerimaan aduan langsung mahasiswa terkait fasilitas kampus & layanan akademik.', pic: 'Advokasi' },
+        { date: '2026-12-04', start: '09:00', end: '12:00', track: 'Hari 2 — Student Center', title: 'Hari 2: Survei Masalah Mahasiswa & Konsultasi Hak Akademik', description: 'Penyebaran survei aspirasi mahasiswa dan pendampingan advokasi kesejahteraan/UKT.', pic: 'Advokasi' },
+        { date: '2026-12-04', start: '13:00', end: '15:30', track: 'Hari 2 — Student Center', title: 'Hari 2: Klasifikasi Isu Prioritas Fakultas', description: 'Pemetaan aduan berdasarkan kategori akademik, fasilitas, dan tata kelola layanan.', pic: 'Advokasi' },
+        { date: '2026-12-05', start: '09:00', end: '12:00', track: 'Hari 3 — Pleno Advokasi', title: 'Hari 3: Konsolidasi & Pendampingan Kasus Lanjutan', description: 'Verifikasi akhir data pengaduan mahasiswa sebelum penutupan posko.', pic: 'Advokasi' },
+        { date: '2026-12-05', start: '13:00', end: '15:30', track: 'Hari 3 — Pleno Advokasi', title: 'Hari 3: Penyusunan Laporan Aspirasi & Publikasi Hasil Awal', description: 'Kompilasi Naskah Suara Mahasiswa untuk disampaikan di Dewantara Public Forum 10 Des.', pic: 'PDD & Advokasi' }
       ]
     },
     {
       id: 'evt-demafest-leadership-forum',
+      parent_event_id: 'evt-demafest-2026',
+      theme_color: '#1e3a8a',
       title: 'Pre-Event MENDAGRI: Dewantara Leadership Forum',
       slug: 'demafest-pre-event-dewantara-leadership-forum',
       category_id: 'cat-3',
@@ -372,14 +383,14 @@ export async function seedDemafestPlan(prisma) {
       is_featured: false,
       speakers: [],
       schedules: [
-        ['08:00', '08:30', 'Registrasi pengurus ormawa', 'Pendataan perwakilan BEM, HMJ & UKM UST', 'MENDAGRI'],
-        ['08:30', '08:45', 'Pembukaan', 'Sambutan penguatan solidaritas ormawa', 'MENDAGRI'],
-        ['08:45', '09:30', 'Materi kepemimpinan organisasi', 'Sesi kepemimpinan Tamansiswa', 'MENDAGRI'],
-        ['09:30', '10:15', 'Materi tata kelola organisasi', 'Best practice manajemen ormawa & kolaborasi', 'MENDAGRI'],
-        ['10:15', '10:30', 'Istirahat', 'Coffee break singkat', 'Panitia'],
-        ['10:30', '11:30', 'Forum diskusi antarlembaga', 'Penyelarasan program kerja BEM, HMJ & UKM', 'MENDAGRI'],
-        ['11:30', '12:00', 'Penyusunan komitmen kolaborasi', 'Persiapan Ormawa Performance & Showcase 10 Des', 'MENDAGRI'],
-        ['12:00', '12:15', 'Penutupan', 'Foto bersama pimpinan ormawa UST', 'PDD']
+        { start: '08:00', end: '08:30', track: 'Auditorium', title: 'Registrasi pengurus ormawa', description: 'Pendataan perwakilan BEM, HMJ & UKM UST', pic: 'MENDAGRI' },
+        { start: '08:30', end: '08:45', track: 'Auditorium', title: 'Pembukaan', description: 'Sambutan penguatan solidaritas ormawa', pic: 'MENDAGRI' },
+        { start: '08:45', end: '09:30', track: 'Auditorium', title: 'Materi kepemimpinan organisasi', description: 'Sesi kepemimpinan Tamansiswa', pic: 'MENDAGRI' },
+        { start: '09:30', end: '10:15', track: 'Auditorium', title: 'Materi tata kelola organisasi', description: 'Best practice manajemen ormawa & kolaborasi', pic: 'MENDAGRI' },
+        { start: '10:15', end: '10:30', track: 'Istirahat', title: 'Istirahat', description: 'Coffee break singkat', pic: 'Panitia' },
+        { start: '10:30', end: '11:30', track: 'Ruang Ormawa', title: 'Forum diskusi antarlembaga', description: 'Penyelarasan program kerja BEM, HMJ & UKM', pic: 'MENDAGRI' },
+        { start: '11:30', end: '12:00', track: 'Ruang Ormawa', title: 'Penyusunan komitmen kolaborasi', description: 'Persiapan Ormawa Performance & Showcase 10 Des', pic: 'MENDAGRI' },
+        { start: '12:00', end: '12:15', track: 'Auditorium', title: 'Penutupan', description: 'Foto bersama pimpinan ormawa UST', pic: 'PDD' }
       ]
     }
   ]
@@ -400,6 +411,10 @@ export async function seedDemafestPlan(prisma) {
     await prisma.event.upsert({
       where: { id: evtDef.id },
       update: {
+        parent_event_id: evtDef.parent_event_id,
+        theme_color: evtDef.theme_color,
+        category_id: evtDef.category_id,
+        category: evtDef.category,
         title: evtDef.title,
         description: evtDef.description,
         location_name: evtDef.location_name,
@@ -409,6 +424,7 @@ export async function seedDemafestPlan(prisma) {
         capacity: evtDef.capacity,
         status: evtDef.status,
         publication_status: evtDef.publication_status,
+        is_featured: evtDef.is_featured,
         enabled_modules: ALL_MODULES,
         speakers: evtDef.speakers,
         created_by: bestanId
@@ -416,6 +432,8 @@ export async function seedDemafestPlan(prisma) {
       create: {
         id: evtDef.id,
         organization_id: orgId,
+        parent_event_id: evtDef.parent_event_id,
+        theme_color: evtDef.theme_color,
         title: evtDef.title,
         slug: evtDef.slug,
         description: evtDef.description,
@@ -457,7 +475,7 @@ export async function seedDemafestPlan(prisma) {
         organization_id: orgId,
         plan_code: 'pro',
         plan_name: 'PRO',
-        price_snapshot_idr: 96750, // Community BEM UST discount snapshot
+        price_snapshot_idr: 96750,
         limits_snapshot: proLimits,
         status: 'active',
         is_trial: false
@@ -485,59 +503,78 @@ export async function seedDemafestPlan(prisma) {
     }
 
     // Schedules / Rundown
-    const eventDate = evtDef.start_at.slice(0, 10)
-    for (const [idx, [start, end, title, description, pic]] of evtDef.schedules.entries()) {
+    const fallbackDate = evtDef.start_at.slice(0, 10)
+    for (const [idx, sch] of evtDef.schedules.entries()) {
       const schId = `sch-${evtDef.id}-${idx + 1}`
+      const dateStr = sch.date || fallbackDate
+      const locStr = sch.location || evtDef.location_name
       await prisma.eventSchedule.upsert({
         where: { id: schId },
-        update: { title, description, start_time: start, end_time: end, pic, sort_order: idx },
+        update: {
+          title: sch.title,
+          description: sch.description,
+          date: dateStr,
+          track: sch.track || null,
+          location: locStr,
+          start_time: sch.start,
+          end_time: sch.end,
+          pic: sch.pic,
+          sort_order: idx
+        },
         create: {
           id: schId,
           event_id: evtDef.id,
-          title,
-          description,
-          date: eventDate,
-          start_time: start,
-          end_time: end,
-          location: evtDef.location_name,
-          pic,
+          title: sch.title,
+          description: sch.description,
+          track: sch.track || null,
+          date: dateStr,
+          start_time: sch.start,
+          end_time: sch.end,
+          location: locStr,
+          pic: sch.pic,
           visibility: 'public',
           sort_order: idx
         }
       })
     }
 
-    // Default ticket tier per event
-    const freeTktId = `tkt-free-${evtDef.id}`
-    await prisma.ticketType.upsert({
-      where: { id: freeTktId },
-      update: {},
-      create: {
-        id: freeTktId,
-        event_id: evtDef.id,
-        name:
-          evtDef.id === 'evt-demafest-2026'
-            ? 'Tiket Mahasiswa UST (Gratis)'
-            : 'Registrasi Peserta Gratis',
-        description: `Tiket resmi ${evtDef.title} (termasuk QR E-Ticket & akses venue).`,
-        price: 0,
-        currency: 'IDR',
-        quantity: evtDef.id === 'evt-demafest-2026' ? 200 : evtDef.capacity,
-        sold_quantity: 0,
-        min_per_order: 1,
-        max_per_order: 3,
-        status: 'On Sale'
-      }
-    })
+    // Default ticket tier per event (except Badminton Cup which uses the 3 Ganda categories below)
+    if (evtDef.id !== 'evt-demafest-badminton') {
+      const freeTktId = `tkt-free-${evtDef.id}`
+      await prisma.ticketType.upsert({
+        where: { id: freeTktId },
+        update: {
+          category: evtDef.id === 'evt-demafest-2026' ? 'Mahasiswa UST' : 'Peserta Umum'
+        },
+        create: {
+          id: freeTktId,
+          event_id: evtDef.id,
+          category: evtDef.id === 'evt-demafest-2026' ? 'Mahasiswa UST' : 'Peserta Umum',
+          name:
+            evtDef.id === 'evt-demafest-2026'
+              ? 'Tiket Mahasiswa UST (Gratis)'
+              : 'Registrasi Peserta Gratis',
+          description: `Tiket resmi ${evtDef.title} (termasuk QR E-Ticket & akses venue).`,
+          price: 0,
+          currency: 'IDR',
+          quantity: evtDef.id === 'evt-demafest-2026' ? 200 : evtDef.capacity,
+          sold_quantity: 0,
+          min_per_order: 1,
+          max_per_order: 3,
+          status: 'On Sale'
+        }
+      })
+    }
   }
 
   // Additional public ticket tier on DEMAFEST Main Event
   await prisma.ticketType.upsert({
     where: { id: 'tkt-umum-evt-demafest-2026' },
-    update: {},
+    update: { category: 'Umum & Tamu' },
     create: {
       id: 'tkt-umum-evt-demafest-2026',
       event_id: 'evt-demafest-2026',
+      category: 'Umum & Tamu',
       name: 'Tiket Umum & Tamu Public Forum',
       description: 'Akses Seminar Dewantara Public Forum, Tamansiswa Heritage Expo & Dewantara Celebration.',
       price: 25000,
@@ -550,42 +587,105 @@ export async function seedDemafestPlan(prisma) {
     }
   })
 
-  // 5. Hierarchical Timeline Checkpoints & Sub-tasks for Main Event (Section 4, 5 & 9 of plan.docx)
+  // 3 Badminton Cup Double Categories (Section 6.2 plan.docx)
+  const badmintonTiers = [
+    { id: 'tkt-badminton-ganda-putra', category: 'Ganda Putra', name: 'Pendaftaran Tim Ganda Putra', description: 'Kategori Turnamen Badminton Ganda Putra antarmahasiswa UST (sistem gugur).', quantity: 40 },
+    { id: 'tkt-badminton-ganda-putri', category: 'Ganda Putri', name: 'Pendaftaran Tim Ganda Putri', description: 'Kategori Turnamen Badminton Ganda Putri antarmahasiswa UST (sistem gugur).', quantity: 40 },
+    { id: 'tkt-badminton-ganda-campuran', category: 'Ganda Campuran', name: 'Pendaftaran Tim Ganda Campuran', description: 'Kategori Turnamen Badminton Ganda Campuran antarmahasiswa UST (sistem gugur).', quantity: 40 }
+  ]
+  for (const bt of badmintonTiers) {
+    await prisma.ticketType.upsert({
+      where: { id: bt.id },
+      update: { category: bt.category, name: bt.name, description: bt.description },
+      create: {
+        id: bt.id,
+        event_id: 'evt-demafest-badminton',
+        category: bt.category,
+        name: bt.name,
+        description: bt.description,
+        price: 0,
+        currency: 'IDR',
+        quantity: bt.quantity,
+        sold_quantity: 0,
+        min_per_order: 1,
+        max_per_order: 2,
+        status: 'On Sale'
+      }
+    })
+  }
+
+  // Active 4-question Survey on Pre-Event Suara Mahasiswa
+  await prisma.eventSurvey.upsert({
+    where: { id: 'srv-demafest-suara' },
+    update: {
+      is_active: true,
+      questions: [
+        { id: 'q1', question: 'Fakultas / Program Studi Anda di UST', question_type: 'text', options: [] },
+        { id: 'q2', question: 'Kategori isu prioritas yang perlu dikawal BEM UST', question_type: 'multiple_choice', options: ['Layanan Akademik & KRS', 'Fasilitas Kampus & Lab', 'UKT & Kesejahteraan Mahasiswa', 'Kebijakan Kemahasiswaan & Ormawa'] },
+        { id: 'q3', question: 'Tingkat kepuasan layanan fasilitas kampus saat ini (1-5)', question_type: 'rating', options: [] },
+        { id: 'q4', question: 'Aspirasi atau usulan konkret untuk Dewantara Public Forum', question_type: 'text', options: [] }
+      ]
+    },
+    create: {
+      id: 'srv-demafest-suara',
+      event_id: 'evt-demafest-suara-mahasiswa',
+      title: 'Survei & Penjaringan Aspirasi Suara Mahasiswa UST 2026',
+      description: 'Masukan mahasiswa akan dirangkum dan disampaikan langsung dalam Dewantara Public Forum (10 Desember 2026).',
+      questions: [
+        { id: 'q1', question: 'Fakultas / Program Studi Anda di UST', question_type: 'text', options: [] },
+        { id: 'q2', question: 'Kategori isu prioritas yang perlu dikawal BEM UST', question_type: 'multiple_choice', options: ['Layanan Akademik & KRS', 'Fasilitas Kampus & Lab', 'UKT & Kesejahteraan Mahasiswa', 'Kebijakan Kemahasiswaan & Ormawa'] },
+        { id: 'q3', question: 'Tingkat kepuasan layanan fasilitas kampus saat ini (1-5)', question_type: 'rating', options: [] },
+        { id: 'q4', question: 'Aspirasi atau usulan konkret untuk Dewantara Public Forum', question_type: 'text', options: [] }
+      ],
+      is_active: true,
+      responses: []
+    }
+  })
+
+  // 5. Hierarchical Timeline Checkpoints & Sub-tasks for Main Event & Pre-Events (Section 4, 5 & 9 of plan.docx)
   const mainId = 'evt-demafest-2026'
   const tasksData = [
     // Week 1 Group
-    { id: 'df-grp-w1', parent_id: null, is_group: true, title: 'Minggu 1 (18–22 Nov): Fondasi Kegiatan & Publikasi Awal', phase: 'Pre-Event', assigned_to: 'Bestan Dhya Ul Haq', priority: 'High', status: 'In Progress', start_date: '2026-11-18', due_at: '2026-11-22', progress: 40 },
-    { id: 'df-t1', parent_id: 'df-grp-w1', is_group: false, title: 'Finalisasi konsep, tema visual (Midnight Blue & Gold) & persetujuan proker', phase: 'Pre-Event', assigned_to: 'Divisi Acara & PDD', priority: 'High', status: 'Done', start_date: '2026-11-18', due_at: '2026-11-19', progress: 100 },
-    { id: 'df-t2', parent_id: 'df-grp-w1', is_group: false, title: 'Penyusunan Master RAB 5 Divisi, proposal & surat perizinan kampus', phase: 'Pre-Event', assigned_to: 'Bendahara & Humas', priority: 'High', status: 'In Progress', start_date: '2026-11-18', due_at: '2026-11-21', progress: 50 },
-    { id: 'df-t3', parent_id: 'df-grp-w1', is_group: false, title: 'Rapat Koordinasi I (20 Nov) & Rilis Teaser DEMAFEST', phase: 'Marketing', assigned_to: 'Divisi PDD', priority: 'High', status: 'To Do', start_date: '2026-11-20', due_at: '2026-11-20', progress: 0 },
-    { id: 'df-t4', parent_id: 'df-grp-w1', is_group: false, title: 'Rapat Teknis I, Rilis Poster Resmi & Pemesanan venue/perlengkapan', phase: 'Production', assigned_to: 'Divisi Perlengkapan & PDD', priority: 'Medium', status: 'To Do', start_date: '2026-11-22', due_at: '2026-11-22', progress: 0 },
+    { id: 'df-grp-w1', event_id: mainId, parent_id: null, is_group: true, title: 'Minggu 1 (18–22 Nov): Fondasi Kegiatan & Publikasi Awal', phase: 'Pre-Event', assigned_to: 'Bestan Dhya Ul Haq', priority: 'High', status: 'In Progress', start_date: '2026-11-18', due_at: '2026-11-22', progress: 40 },
+    { id: 'df-t1', event_id: mainId, parent_id: 'df-grp-w1', is_group: false, title: 'Finalisasi konsep, identitas visual (Navy Blue & Gold) & persetujuan proker', phase: 'Pre-Event', assigned_to: 'Divisi Acara & PDD', priority: 'High', status: 'Done', start_date: '2026-11-18', due_at: '2026-11-19', progress: 100 },
+    { id: 'df-t2', event_id: mainId, parent_id: 'df-grp-w1', is_group: false, title: 'Penyusunan Master RAB 5 Divisi, proposal & surat perizinan kampus', phase: 'Pre-Event', assigned_to: 'Bendahara & Humas', priority: 'High', status: 'In Progress', start_date: '2026-11-18', due_at: '2026-11-21', progress: 50 },
+    { id: 'df-t3', event_id: mainId, parent_id: 'df-grp-w1', is_group: false, title: 'Rapat Koordinasi I (20 Nov) & Rilis Teaser Resmi DEMAFEST', phase: 'Marketing', assigned_to: 'Divisi PDD', priority: 'High', status: 'To Do', start_date: '2026-11-20', due_at: '2026-11-20', progress: 0 },
+    { id: 'df-t4', event_id: mainId, parent_id: 'df-grp-w1', is_group: false, title: 'Rapat Teknis I, Rilis Poster Resmi & Pemesanan venue/perlengkapan', phase: 'Production', assigned_to: 'Divisi Perlengkapan & PDD', priority: 'Medium', status: 'To Do', start_date: '2026-11-22', due_at: '2026-11-22', progress: 0 },
 
     // Week 2 Group
-    { id: 'df-grp-w2', parent_id: null, is_group: true, title: 'Minggu 2 (23–29 Nov): Open Reg, Dewa Connect & Badminton Cup', phase: 'Pre-Event', assigned_to: 'MENLU & MENPORA', priority: 'High', status: 'To Do', start_date: '2026-11-23', due_at: '2026-11-29', progress: 0 },
-    { id: 'df-t5', parent_id: 'df-grp-w2', is_group: false, title: 'Open Registration DEMAFEST (23 Nov) & Rapat Koordinasi II–III (24 & 26 Nov)', phase: 'Marketing', assigned_to: 'Divisi Humas & PDD', priority: 'High', status: 'To Do', start_date: '2026-11-23', due_at: '2026-11-26', progress: 0 },
-    { id: 'df-t6', parent_id: 'df-grp-w2', is_group: false, title: 'Pelaksanaan Pre-Event Dewa Connect (MENLU) & Pengumuman Narasumber (28 Nov)', phase: 'Main-Event', assigned_to: 'Kementerian MENLU', priority: 'High', status: 'To Do', start_date: '2026-11-28', due_at: '2026-11-28', progress: 0 },
-    { id: 'df-t7', parent_id: 'df-grp-w2', is_group: false, title: 'Pelaksanaan Dewantara Badminton Cup (MENPORA) & Evaluasi I (29 Nov)', phase: 'Main-Event', assigned_to: 'Kementerian MENPORA', priority: 'High', status: 'To Do', start_date: '2026-11-29', due_at: '2026-11-29', progress: 0 },
+    { id: 'df-grp-w2', event_id: mainId, parent_id: null, is_group: true, title: 'Minggu 2 (23–29 Nov): Open Reg, Dewa Connect & Badminton Cup', phase: 'Pre-Event', assigned_to: 'MENLU & MENPORA', priority: 'High', status: 'To Do', start_date: '2026-11-23', due_at: '2026-11-29', progress: 0 },
+    { id: 'df-t5', event_id: mainId, parent_id: 'df-grp-w2', is_group: false, title: 'Open Registration DEMAFEST, Pengumuman Lomba & Rakor II–III (23–26 Nov)', phase: 'Marketing', assigned_to: 'Divisi Humas & PDD', priority: 'High', status: 'To Do', start_date: '2026-11-23', due_at: '2026-11-26', progress: 0 },
+    { id: 'df-t6', event_id: mainId, parent_id: 'df-grp-w2', is_group: false, title: 'Pelaksanaan Pre-Event Dewa Connect (MENLU), Technical Meeting Lomba & Rilis Line-up Narasumber/Guest Star', phase: 'Event Day', assigned_to: 'Kementerian MENLU & Acara', priority: 'High', status: 'To Do', start_date: '2026-11-27', due_at: '2026-11-28', progress: 0 },
+    { id: 'df-t7', event_id: mainId, parent_id: 'df-grp-w2', is_group: false, title: 'Pelaksanaan Dewantara Badminton Cup (MENPORA) & Rapat Evaluasi I (29 Nov)', phase: 'Event Day', assigned_to: 'Kementerian MENPORA', priority: 'High', status: 'To Do', start_date: '2026-11-29', due_at: '2026-11-29', progress: 0 },
 
     // Week 3 Group
-    { id: 'df-grp-w3', parent_id: null, is_group: true, title: 'Minggu 3 (30 Nov–6 Des): Critical Space, Suara Mahasiswa & Leadership Forum', phase: 'Production', assigned_to: 'KASTRAT, Advokasi & MENDAGRI', priority: 'High', status: 'To Do', start_date: '2026-11-30', due_at: '2026-12-06', progress: 0 },
-    { id: 'df-t8', parent_id: 'df-grp-w3', is_group: false, title: 'Publikasi Tamansiswa Expo (1 Des), Achievement Awards (2 Des) & Critical Space', phase: 'Marketing', assigned_to: 'KASTRAT & PDD', priority: 'Medium', status: 'To Do', start_date: '2026-12-01', due_at: '2026-12-02', progress: 0 },
-    { id: 'df-t9', parent_id: 'df-grp-w3', is_group: false, title: 'Posko Aspirasi Suara Mahasiswa (3–5 Des) & Rapat Koordinasi V (4 Des)', phase: 'Production', assigned_to: 'Kementerian Advokasi', priority: 'Medium', status: 'To Do', start_date: '2026-12-03', due_at: '2026-12-05', progress: 0 },
-    { id: 'df-t10', parent_id: 'df-grp-w3', is_group: false, title: 'Pelaksanaan Dewantara Leadership Forum (MENDAGRI) & Rapat Teknis II (6 Des)', phase: 'Production', assigned_to: 'Kementerian MENDAGRI', priority: 'High', status: 'To Do', start_date: '2026-12-06', due_at: '2026-12-06', progress: 0 },
+    { id: 'df-grp-w3', event_id: mainId, parent_id: null, is_group: true, title: 'Minggu 3 (30 Nov–6 Des): Critical Space, Suara Mahasiswa & Leadership Forum', phase: 'Production', assigned_to: 'KASTRAT, Advokasi & MENDAGRI', priority: 'High', status: 'To Do', start_date: '2026-11-30', due_at: '2026-12-06', progress: 0 },
+    { id: 'df-t8', event_id: mainId, parent_id: 'df-grp-w3', is_group: false, title: 'Publikasi Tamansiswa Expo (1 Des), Achievement Awards (2 Des) & Critical Space', phase: 'Marketing', assigned_to: 'KASTRAT & PDD', priority: 'Medium', status: 'To Do', start_date: '2026-12-01', due_at: '2026-12-02', progress: 0 },
+    { id: 'df-t9', event_id: mainId, parent_id: 'df-grp-w3', is_group: false, title: 'Posko Aspirasi Suara Mahasiswa (3–5 Des), Countdown H-7 & Rapat Koordinasi V (4 Des)', phase: 'Production', assigned_to: 'Kementerian Advokasi & PDD', priority: 'Medium', status: 'To Do', start_date: '2026-12-03', due_at: '2026-12-05', progress: 0 },
+    { id: 'df-t10', event_id: mainId, parent_id: 'df-grp-w3', is_group: false, title: 'Pelaksanaan Dewantara Leadership Forum (MENDAGRI) & Rapat Teknis II (6 Des)', phase: 'Production', assigned_to: 'Kementerian MENDAGRI', priority: 'High', status: 'To Do', start_date: '2026-12-06', due_at: '2026-12-06', progress: 0 },
 
     // Week 4 Group
-    { id: 'df-grp-w4', parent_id: null, is_group: true, title: 'Minggu 4 (7–15 Des): Gladi Bersih, Main Event & Aftermovie', phase: 'Showtime', assigned_to: 'Seluruh Panitia DEMAFEST', priority: 'High', status: 'To Do', start_date: '2026-12-07', due_at: '2026-12-15', progress: 0 },
-    { id: 'df-t11', parent_id: 'df-grp-w4', is_group: false, title: 'Rekapitulasi hasil seluruh proker kementerian & Countdown H-3 (7 Des)', phase: 'Showtime', assigned_to: 'Seluruh Kementerian', priority: 'High', status: 'To Do', start_date: '2026-12-07', due_at: '2026-12-07', progress: 0 },
-    { id: 'df-t12', parent_id: 'df-grp-w4', is_group: false, title: 'Gladi bersih teknis, Rapat Final (8 Des), Setup Venue & Briefing Akhir (9 Des)', phase: 'Showtime', assigned_to: 'Perlengkapan, Keamanan & Acara', priority: 'High', status: 'To Do', start_date: '2026-12-08', due_at: '2026-12-09', progress: 0 },
-    { id: 'df-t13', parent_id: 'df-grp-w4', is_group: false, title: 'Puncak DEMAFEST Main Event & Live Report (10 Des) + Aftermovie (12–15 Des)', phase: 'Showtime', assigned_to: 'Bestan Dhya Ul Haq & PDD', priority: 'High', status: 'To Do', start_date: '2026-12-10', due_at: '2026-12-15', progress: 0 }
+    { id: 'df-grp-w4', event_id: mainId, parent_id: null, is_group: true, title: 'Minggu 4 (7–15 Des): Gladi Bersih, Main Event & Evaluasi LPJ', phase: 'Event Day', assigned_to: 'Seluruh Panitia DEMAFEST', priority: 'High', status: 'To Do', start_date: '2026-12-07', due_at: '2026-12-15', progress: 0 },
+    { id: 'df-t11', event_id: mainId, parent_id: 'df-grp-w4', is_group: false, title: 'Rekapitulasi hasil seluruh proker kementerian & Countdown H-3 (7 Des)', phase: 'Marketing', assigned_to: 'Seluruh Kementerian', priority: 'High', status: 'To Do', start_date: '2026-12-07', due_at: '2026-12-07', progress: 0 },
+    { id: 'df-t12', event_id: mainId, parent_id: 'df-grp-w4', is_group: false, title: 'Gladi bersih teknis, Rapat Final (8 Des), Setup Venue & Briefing Akhir (9 Des)', phase: 'Production', assigned_to: 'Perlengkapan, Keamanan & Acara', priority: 'High', status: 'To Do', start_date: '2026-12-08', due_at: '2026-12-09', progress: 0 },
+    { id: 'df-t13', event_id: mainId, parent_id: 'df-grp-w4', is_group: false, title: 'Puncak DEMAFEST Main Event & Live Report (10 Des)', phase: 'Event Day', assigned_to: 'Bestan Dhya Ul Haq & PDD', priority: 'High', status: 'To Do', start_date: '2026-12-10', due_at: '2026-12-10', progress: 0 },
+    { id: 'df-t14', event_id: mainId, parent_id: 'df-grp-w4', is_group: false, title: 'Rapat Evaluasi Akhir, Penyusunan LPJ Resmi & Rilis Aftermovie (12–15 Des)', phase: 'Post-Event', assigned_to: 'Panitia Inti & Divisi PDD', priority: 'High', status: 'To Do', start_date: '2026-12-12', due_at: '2026-12-15', progress: 0 },
+
+    // Pre-Event operational tasks on child events
+    { id: 'df-pre-t1', event_id: 'evt-demafest-dewa-connect', parent_id: null, is_group: false, title: 'Konfirmasi delegasi & pengiriman surat permohonan studi banding BEM Mitra', phase: 'Pre-Event', assigned_to: 'MENLU BEM UST', priority: 'High', status: 'In Progress', start_date: '2026-11-20', due_at: '2026-11-26', progress: 60 },
+    { id: 'df-pre-t2', event_id: 'evt-demafest-badminton', parent_id: null, is_group: false, title: 'Technical Meeting Turnamen & penyusunan bagan Ganda Putra/Putri/Campuran', phase: 'Pre-Event', assigned_to: 'MENPORA BEM UST', priority: 'High', status: 'To Do', start_date: '2026-11-25', due_at: '2026-11-28', progress: 0 },
+    { id: 'df-pre-t3', event_id: 'evt-demafest-critical-space', parent_id: null, is_group: false, title: 'Kurasi 4 isu kebijakan & penyusunan TOR diskusi Critical Space', phase: 'Pre-Event', assigned_to: 'KASTRAT BEM UST', priority: 'High', status: 'To Do', start_date: '2026-11-26', due_at: '2026-12-01', progress: 0 },
+    { id: 'df-pre-t4', event_id: 'evt-demafest-suara-mahasiswa', parent_id: null, is_group: false, title: 'Setup Posko Aspirasi Student Center & publikasi kuesioner Suara Mahasiswa', phase: 'Pre-Event', assigned_to: 'Kementerian Advokasi', priority: 'High', status: 'To Do', start_date: '2026-11-30', due_at: '2026-12-02', progress: 0 },
+    { id: 'df-pre-t5', event_id: 'evt-demafest-leadership-forum', parent_id: null, is_group: false, title: 'Undangan delegasi pengurus BEM/HMJ/UKM & modul kepemimpinan Tamansiswa', phase: 'Pre-Event', assigned_to: 'MENDAGRI BEM UST', priority: 'High', status: 'To Do', start_date: '2026-12-01', due_at: '2026-12-05', progress: 0 }
   ]
 
   for (const t of tasksData) {
     await prisma.eventTask.upsert({
       where: { id: t.id },
-      update: { title: t.title, start_date: t.start_date, due_at: t.due_at },
+      update: { title: t.title, phase: t.phase, start_date: t.start_date, due_at: t.due_at },
       create: {
         id: t.id,
-        event_id: mainId,
+        event_id: t.event_id,
         parent_id: t.parent_id,
         is_group: t.is_group,
         title: t.title,
@@ -600,19 +700,20 @@ export async function seedDemafestPlan(prisma) {
     })
   }
 
-  // 6. 5 Divisi Kepanitiaan (Team Members for Main Event)
+  // 6. 5 Divisi Kepanitiaan + Bendahara Pusat (Team Members for Main Event)
   const divisionLeads = [
+    { id: 'tm-df-bendahara', name: 'Bendahara Pusat DEMAFEST', email: 'bendahara@bemust.id', role: 'Manager', department: 'Keuangan & RAB Panitia Inti', permissions: ['View Event', 'View Finance', 'Manage Tickets'] },
     { id: 'tm-df-acara', name: 'Koordinator Divisi Acara', email: 'acara@bemust.id', role: 'Manager', department: 'Divisi Acara (Konsep, Rundown, MC, Narasumber)', permissions: ['View Event', 'Edit Event', 'Manage Timeline', 'View Participants'] },
-    { id: 'tm-df-humas', name: 'Koordinator Divisi Humas', email: 'humas@bemust.id', role: 'Manager', department: 'Divisi Humas (Undangan, Rektorat, Sponsor, Medpart)', permissions: ['View Event', 'View Participants', 'Manage Tickets'] },
+    { id: 'tm-df-humas', name: 'Koordinator Divisi Humas', email: 'humas@bemust.id', role: 'Manager', department: 'Divisi Humas (Undangan, Rektorat, Sponsor, Medpart)', permissions: ['View Event', 'Manage Timeline', 'View Participants', 'Manage Tickets'] },
     { id: 'tm-df-perkap', name: 'Koordinator Divisi Perlengkapan', email: 'perlengkapan@bemust.id', role: 'Staff', department: 'Divisi Perlengkapan (Panggung, Sound, Tenda Expo)', permissions: ['View Event', 'Manage Timeline'] },
     { id: 'tm-df-keamanan', name: 'Koordinator Divisi Keamanan', email: 'keamanan@bemust.id', role: 'Staff', department: 'Divisi Keamanan (Akses, Parkir, Massa, P3K)', permissions: ['View Event', 'Manage Check-in'] },
-    { id: 'tm-df-pdd', name: 'Koordinator Divisi PDD', email: 'pdd@bemust.id', role: 'Manager', department: 'Divisi PDD (Branding, Poster, Dokumentasi, Aftermovie)', permissions: ['View Event', 'Edit Event'] }
+    { id: 'tm-df-pdd', name: 'Koordinator Divisi PDD', email: 'pdd@bemust.id', role: 'Manager', department: 'Divisi PDD (Branding, Poster, Dokumentasi, Aftermovie)', permissions: ['View Event', 'Edit Event', 'Manage Timeline'] }
   ]
 
   for (const dm of divisionLeads) {
     await prisma.teamMember.upsert({
       where: { id: dm.id },
-      update: {},
+      update: { permissions: dm.permissions },
       create: {
         id: dm.id,
         event_id: mainId,
@@ -626,10 +727,10 @@ export async function seedDemafestPlan(prisma) {
     })
   }
 
-  // 7. Finance Budget, RAB Categories (Section 8 of plan.docx), Vendors & Documents
+  // 7. Finance Budget, RAB Categories (Section 8 of plan.docx), Pre-Event Budgets, Vendors & Documents
   await prisma.eventBudget.upsert({
     where: { event_id: mainId },
-    update: {},
+    update: { amount: 25000000 },
     create: {
       event_id: mainId,
       amount: 25000000
@@ -641,14 +742,15 @@ export async function seedDemafestPlan(prisma) {
     { id: 'df-exp-2', category: 'Divisi Humas', description: 'Cetak undangan VIP/rektorat, souvenir tamu & operasional sponsorship', amount: 2200000, date: '2026-11-24' },
     { id: 'df-exp-3', category: 'Divisi Perlengkapan', description: 'Sound system, panggung, tenda booth Tamansiswa Expo, backdrop & listrik (estimasi Yogyakarta)', amount: 7500000, date: '2026-11-25' },
     { id: 'df-exp-4', category: 'Divisi Keamanan', description: 'Rompi panitia, sewa HT komunikasi, P3K medis, tali pembatas & konsumsi keamanan', amount: 1800000, date: '2026-11-26' },
-    { id: 'df-exp-5', category: 'Divisi PDD', description: 'Desain identitas visual Midnight Blue & Gold, cetak poster/banner, ID card & produksi aftermovie', amount: 2500000, date: '2026-11-22' },
-    { id: 'df-exp-6', category: 'Pre-Event 5 Kementerian', description: 'Estimasi tambahan: Dewa Connect, Badminton Cup, Critical Space, Suara Mahasiswa & Leadership Forum', amount: 4000000, date: '2026-11-27' }
+    { id: 'df-exp-5', category: 'Divisi PDD', description: 'Desain identitas visual Navy Blue & Gold, cetak poster/banner, ID card & produksi aftermovie', amount: 2500000, date: '2026-11-22' },
+    { id: 'df-exp-7', category: 'Dana Cadangan (10%)', description: 'Alokasi dana cadangan 10% total kebutuhan inti untuk mitigasi darurat operasional', amount: 1850000, date: '2026-11-22' },
+    { id: 'df-exp-6', category: 'Pre-Event 5 Kementerian', description: 'Subsidi induk untuk 5 Pre-Event (Dewa Connect, Badminton Cup, Critical Space, Suara Mahasiswa, Leadership Forum)', amount: 4000000, date: '2026-11-27' }
   ]
 
   for (const exp of rabExpenses) {
     await prisma.financeExpense.upsert({
       where: { id: exp.id },
-      update: {},
+      update: { category: exp.category, description: exp.description, amount: exp.amount },
       create: {
         id: exp.id,
         event_id: mainId,
@@ -656,6 +758,35 @@ export async function seedDemafestPlan(prisma) {
         description: exp.description,
         amount: exp.amount,
         date: exp.date,
+        created_by: bestanId
+      }
+    })
+  }
+
+  // Separate budgets for each Pre-Event workspace
+  const preEventBudgets = [
+    { event_id: 'evt-demafest-dewa-connect', amount: 800000, label: 'Alokasi Studi Banding MENLU' },
+    { event_id: 'evt-demafest-badminton', amount: 1200000, label: 'Alokasi Turnamen MENPORA (Sewa Lapangan, Shuttlecock & Trofi)' },
+    { event_id: 'evt-demafest-critical-space', amount: 600000, label: 'Alokasi Forum Kajian KASTRAT' },
+    { event_id: 'evt-demafest-suara-mahasiswa', amount: 600000, label: 'Alokasi Posko Aspirasi Advokasi 3 Hari' },
+    { event_id: 'evt-demafest-leadership-forum', amount: 800000, label: 'Alokasi Kepemimpinan MENDAGRI' }
+  ]
+  for (const pb of preEventBudgets) {
+    await prisma.eventBudget.upsert({
+      where: { event_id: pb.event_id },
+      update: { amount: pb.amount },
+      create: { event_id: pb.event_id, amount: pb.amount }
+    })
+    await prisma.financeIncome.upsert({
+      where: { id: `df-inc-${pb.event_id}` },
+      update: { amount: pb.amount },
+      create: {
+        id: `df-inc-${pb.event_id}`,
+        event_id: pb.event_id,
+        category: 'Subsidi Induk DEMAFEST',
+        description: pb.label,
+        amount: pb.amount,
+        date: '2026-11-20',
         created_by: bestanId
       }
     })
@@ -734,4 +865,21 @@ export async function seedDemafestPlan(prisma) {
   }
 
   return { bestanId, email, initialPassword, orgId, eventIds: demafestEvents.map((e) => e.id) }
+}
+
+const isDirectRun =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+
+if (isDirectRun) {
+  const { PrismaClient } = await import('@prisma/client')
+  const standalonePrisma = new PrismaClient()
+  seedDemafestPlan(standalonePrisma)
+    .then((res) => {
+      console.log(`DEMAFEST 2026 seed selesai untuk ${res.email} (${res.eventIds.length} events).`)
+    })
+    .catch((err) => {
+      console.error('Seed DEMAFEST gagal:', err)
+      process.exitCode = 1
+    })
+    .finally(() => standalonePrisma.$disconnect())
 }

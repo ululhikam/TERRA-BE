@@ -7,7 +7,7 @@ import { generateQrToken } from './crypto.js'
  * Build the canonical QR payload string for a purchased or issued ticket.
  * Format: TERRA:<ticketCode>:<eventId>:<shortToken>
  */
-export function buildTicketQrPayload(ticketCode, eventId, token = generateQrToken().slice(0, 8)) {
+export function buildTicketQrPayload(ticketCode, eventId, token = generateQrToken().slice(0, 16)) {
   const code = String(ticketCode || '').trim().toUpperCase()
   const evt = String(eventId || '').trim()
   const suffix = String(token || '').trim()
@@ -101,21 +101,42 @@ export async function generateTicketQrSvg(qrPayload, options = {}) {
   })
 }
 
-export function createQrDownloadToken(resourceId) {
-  return crypto
+export function createQrDownloadToken(resourceId, ttlSeconds = 30 * 24 * 60 * 60) {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds
+  const sig = crypto
     .createHmac('sha256', env.qrSigningSecret)
-    .update(String(resourceId))
+    .update(`${String(resourceId)}:${exp}`)
     .digest('hex')
     .slice(0, 32)
+  return `${exp}.${sig}`
 }
 
 export function verifyQrDownloadToken(token, resourceId) {
   if (!token || !resourceId) return false
-  const expected = createQrDownloadToken(resourceId)
-  const a = Buffer.from(String(token))
+  const raw = String(token).trim()
+  const parts = raw.split('.')
+  if (parts.length !== 2) return false
+  const [expStr, sig] = parts
+  const exp = Number(expStr)
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false
+
+  const expected = crypto
+    .createHmac('sha256', env.qrSigningSecret)
+    .update(`${String(resourceId)}:${exp}`)
+    .digest('hex')
+    .slice(0, 32)
+  const a = Buffer.from(sig)
   const b = Buffer.from(expected)
   if (a.length !== b.length) return false
   return crypto.timingSafeEqual(a, b)
+}
+
+export function createEmailPreviewToken(emailId, ttlSeconds = 7 * 24 * 60 * 60) {
+  return createQrDownloadToken(`email:${emailId}`, ttlSeconds)
+}
+
+export function verifyEmailPreviewToken(token, emailId) {
+  return verifyQrDownloadToken(token, `email:${emailId}`)
 }
 
 export async function attachTicketQr(ticket) {

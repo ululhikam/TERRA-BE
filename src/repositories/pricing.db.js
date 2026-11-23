@@ -515,6 +515,13 @@ export async function previewBillingCheckout({
       ? store.promoCodes.find((p) => p.code.toUpperCase() === cleanPromo && p.is_active)
       : await prisma.promoCode.findFirst({ where: { code: cleanPromo, is_active: true } })
     if (!promo) throw new AppError(`Kode promo "${cleanPromo}" tidak ditemukan atau tidak aktif.`, 404, 'PROMO_NOT_FOUND')
+    const nowTs = Date.now()
+    if (promo.starts_at && new Date(promo.starts_at).getTime() > nowTs) {
+      throw new AppError(`Kode promo "${cleanPromo}" belum memasuki masa berlaku.`, 400, 'PROMO_NOT_STARTED')
+    }
+    if (promo.ends_at && new Date(promo.ends_at).getTime() < nowTs) {
+      throw new AppError(`Kode promo "${cleanPromo}" sudah kedaluwarsa.`, 400, 'PROMO_EXPIRED')
+    }
     if (promo.max_redemptions && promo.used_count >= promo.max_redemptions) {
       throw new AppError('Kuota penggunaan kode promo ini sudah habis.', 409, 'PROMO_EXHAUSTED')
     }
@@ -569,7 +576,9 @@ export async function createBillingCheckout(user, payload) {
 
   const invoiceNumber = generateInvoiceNumber()
   const isFree = preview.final_amount_idr === 0
-  const txStatus = isFree ? 'Paid' : 'Pending'
+  const requiresManualVerify = Boolean(preview.applied_promo?.requires_verification)
+  const autoActivate = isFree && !requiresManualVerify
+  const txStatus = autoActivate ? 'Paid' : 'Pending'
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000)
 
   if (!usePrisma()) {
@@ -595,7 +604,7 @@ export async function createBillingCheckout(user, payload) {
       payment_notes: payload.payment_notes || null,
       admin_notes: null,
       verified_by: null,
-      verified_at: isFree ? new Date().toISOString() : null,
+      verified_at: autoActivate ? new Date().toISOString() : null,
       status: txStatus,
       expires_at: expiresAt.toISOString(),
       created_at: new Date().toISOString(),
@@ -612,7 +621,7 @@ export async function createBillingCheckout(user, payload) {
       to_plan: preview.plan_code,
       details: { invoice_number: invoiceNumber, amount: preview.final_amount_idr, status: txStatus }
     })
-    if (isFree) {
+    if (autoActivate) {
       await verifyBillingTransactionInternal(txRecord.id, { id: 'system', role: 'admin' }, { status: 'Paid', admin_notes: 'Otomatis aktif (Rp 0).' })
     }
     return {
@@ -662,7 +671,7 @@ export async function createBillingCheckout(user, payload) {
     return rec
   })
 
-  if (isFree) {
+  if (autoActivate) {
     const verified = await adminVerifyBillingTransaction(created.id, { id: user.id, role: 'admin' }, { status: 'Paid', admin_notes: 'Aktivasi otomatis (Rp 0).' })
     return {
       transaction: verified,
@@ -682,6 +691,14 @@ export async function submitTransactionProof(txId, user, { payment_proof_url, pa
   if (!usePrisma()) {
     const tx = store.billingTransactions.find((t) => t.id === txId)
     if (!tx) throw new AppError('Transaksi tidak ditemukan.', 404, 'TX_NOT_FOUND')
+    if (tx.status === 'Paid') {
+      throw new AppError('Transaksi sudah lunas dan diverifikasi.', 409, 'TX_ALREADY_PAID')
+    }
+    const org = store.organizations.find((o) => o.id === tx.organization_id)
+    const isOrgMember = org?.members?.some((m) => m.user_id === user.id || m.email === user.email)
+    if (user.role !== 'admin' && tx.organizer_id !== user.id && !isOrgMember) {
+      throw new AppError('Anda tidak memiliki izin mengunggah bukti untuk transaksi ini.', 403, 'FORBIDDEN')
+    }
     tx.payment_proof_url = payment_proof_url
     tx.payment_notes = payment_notes || tx.payment_notes
     tx.status = 'Waiting Verification'
@@ -699,6 +716,20 @@ export async function submitTransactionProof(txId, user, { payment_proof_url, pa
 
   const existing = await prisma.billingTransaction.findUnique({ where: { id: txId } })
   if (!existing) throw new AppError('Transaksi tidak ditemukan.', 404, 'TX_NOT_FOUND')
+  if (existing.status === 'Paid') {
+    throw new AppError('Transaksi sudah lunas dan diverifikasi.', 409, 'TX_ALREADY_PAID')
+  }
+  if (user.role !== 'admin' && existing.organizer_id !== user.id) {
+    const member = await prisma.organizationMember.findFirst({
+      where: {
+        organization_id: existing.organization_id,
+        OR: [{ user_id: user.id }, { email: user.email }]
+      }
+    })
+    if (!member) {
+      throw new AppError('Anda tidak memiliki izin mengunggah bukti untuk transaksi ini.', 403, 'FORBIDDEN')
+    }
+  }
 
   const updated = await prisma.billingTransaction.update({
     where: { id: txId },

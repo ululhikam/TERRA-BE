@@ -1183,11 +1183,32 @@ class BackendStore {
     if (evt.status === 'Cancelled') {
       throw new AppError('Event telah dibatalkan dan tidak menerima pemesanan.', 409, 'EVENT_CANCELLED')
     }
+    if (evt.publication_status !== 'Published') {
+      throw new AppError('Event belum dipublikasikan dan tidak menerima pemesanan.', 409, 'EVENT_NOT_PUBLISHED')
+    }
 
     const tkt = this.ticketTypes.find((t) => t.id === ticket_type_id && t.event_id === event_id)
     if (!tkt) throw new AppError('Jenis tiket tidak ditemukan.', 404, 'TICKET_TYPE_NOT_FOUND')
     if (tkt.status !== 'On Sale') {
       throw new AppError(`Tiket sedang dalam status ${tkt.status}.`, 409, 'TICKET_NOT_ON_SALE')
+    }
+
+    const now = new Date()
+    if (tkt.sale_start_at && new Date(tkt.sale_start_at) > now) {
+      throw new AppError('Periode penjualan tiket ini belum dimulai.', 409, 'TICKET_SALE_NOT_STARTED')
+    }
+    if (tkt.sale_end_at && new Date(tkt.sale_end_at) < now) {
+      throw new AppError('Periode penjualan tiket ini telah berakhir.', 409, 'TICKET_SALE_ENDED')
+    }
+
+    const minOrder = Number(tkt.min_per_order || 1)
+    const maxOrder = Number(tkt.max_per_order || 10)
+    if (quantity < minOrder || quantity > maxOrder) {
+      throw new AppError(
+        `Jumlah tiket harus antara ${minOrder} sampai ${maxOrder} per transaksi.`,
+        400,
+        'INVALID_TICKET_QUANTITY'
+      )
     }
 
     const remaining = tkt.quantity - tkt.sold_quantity
@@ -1203,8 +1224,10 @@ class BackendStore {
 
     const subtotal = Number(tkt.price) * quantity
     const isFree = Number(tkt.price) === 0
-    const orderStatus = 'Confirmed'
-    const paymentStatus = isFree ? 'Not Required' : 'Paid'
+    const orderStatus = isFree ? 'Confirmed' : 'Pending'
+    const paymentStatus = isFree ? 'Not Required' : 'Pending'
+    const registrationStatus = isFree ? 'Confirmed' : 'Pending'
+    const initialTicketStatus = isFree ? 'Active' : 'Pending'
 
     const order = {
       id: 'ord-' + Date.now(),
@@ -1218,6 +1241,10 @@ class BackendStore {
       currency: tkt.currency,
       order_status: orderStatus,
       payment_status: paymentStatus,
+      payment_proof_url: null,
+      payment_notes: null,
+      verified_by: null,
+      verified_at: null,
       created_at: new Date().toISOString()
     }
     this.orders.unshift(order)
@@ -1233,14 +1260,15 @@ class BackendStore {
       ticket_type: tkt.name,
       ticket_code: null,
       order_number: order.order_number,
-      registration_status: 'Confirmed',
+      registration_status: registrationStatus,
+      registration_data: attendee.registration_data || {},
       checked_in: false
     }
 
     const issuedTickets = []
     for (let i = 0; i < quantity; i++) {
       const code = generateTicketCode()
-      const rawToken = `TERRA:${code}:${event_id}:${generateQrToken().slice(0, 8)}`
+      const rawToken = `TERRA:${code}:${event_id}:${generateQrToken().slice(0, 16)}`
       const ticket = {
         id: 'tc-' + Date.now() + '-' + i,
         event_id,
@@ -1256,7 +1284,7 @@ class BackendStore {
         qr_payload: rawToken,
         qr_token_hash: hashQrToken(rawToken),
         participant_name: attendee.full_name,
-        status: 'Active',
+        status: initialTicketStatus,
         issued_at: new Date().toISOString(),
         used_at: null
       }
@@ -1269,14 +1297,19 @@ class BackendStore {
     return { order, participant, tickets: issuedTickets }
   }
 
-  cancelOrder(orderId, userId, isAdmin = false) {
+  cancelOrder(orderId, userId, isAdminOrAuthorized = false) {
     const order = this.orders.find((o) => o.id === orderId)
     if (!order) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
-    if (!isAdmin && order.customer_id !== userId) {
+    if (!isAdminOrAuthorized && order.customer_id !== userId) {
       throw new AppError('Tidak memiliki izin membatalkan order ini.', 403, 'FORBIDDEN')
     }
     if (order.order_status === 'Cancelled') {
       throw new AppError('Order sudah dibatalkan sebelumnya.', 409, 'ORDER_ALREADY_CANCELLED')
+    }
+
+    const orderTickets = this.tickets.filter((tk) => tk.order_id === order.id)
+    if (orderTickets.some((tk) => tk.status === 'Used')) {
+      throw new AppError('Order tidak dapat dibatalkan karena tiket sudah digunakan check-in.', 409, 'ORDER_ALREADY_USED')
     }
 
     // Restore ticket quota
@@ -1289,8 +1322,8 @@ class BackendStore {
     }
 
     order.order_status = 'Cancelled'
-    this.tickets.forEach((tk) => {
-      if (tk.order_id === order.id) tk.status = 'Cancelled'
+    orderTickets.forEach((tk) => {
+      tk.status = 'Cancelled'
     })
     this.participants.forEach((p) => {
       if (p.order_id === order.id) p.registration_status = 'Cancelled'
@@ -1315,6 +1348,10 @@ class BackendStore {
     if (!ticket) {
       throw new AppError(`Tiket "${cleanCode || raw}" tidak ditemukan atau tidak valid.`, 404, 'TICKET_NOT_FOUND')
     }
+    const evt = this.events.find((e) => e.id === ticket.event_id && !e.deleted_at)
+    if (evt && evt.status === 'Cancelled') {
+      throw new AppError('Event telah dibatalkan sehingga check-in ditutup.', 409, 'EVENT_CANCELLED')
+    }
     if (parsed.isTerraQr && parsed.eventId && ticket.event_id !== parsed.eventId) {
       throw new AppError('Payload QR Code tidak sesuai dengan event tiket.', 400, 'INVALID_QR_PAYLOAD')
     }
@@ -1324,6 +1361,12 @@ class BackendStore {
         409,
         'WRONG_EVENT_TICKET'
       )
+    }
+    if (ticket.status === 'Pending') {
+      throw new AppError('Pembayaran tiket belum diverifikasi oleh panitia.', 409, 'TICKET_PAYMENT_PENDING')
+    }
+    if (ticket.status === 'Expired') {
+      throw new AppError('Tiket telah kedaluwarsa dan tidak berlaku.', 409, 'TICKET_EXPIRED')
     }
     if (ticket.status === 'Cancelled') {
       throw new AppError('Tiket telah dibatalkan dan tidak berlaku.', 409, 'TICKET_CANCELLED')

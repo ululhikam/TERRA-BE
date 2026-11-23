@@ -181,6 +181,9 @@ model Event {
   terms              String?
   contact_email      String?
   contact_phone      String?
+  parent_event_id    String?
+  theme_color        String?
+  faq                Json      @default("[]")
   enabled_modules    Json      @default("[\"event_profile\",\"timeline\",\"tasks\",\"team\",\"ticketing\",\"participants\",\"check_in\",\"finance\",\"vendors\",\"sponsors\",\"documents\",\"reports\",\"feedback\"]")
   created_by         String?
   published_at       DateTime?
@@ -215,6 +218,8 @@ model Event {
 
   @@index([organization_id])
   @@index([publication_status, status])
+  @@index([start_at])
+  @@index([parent_event_id])
   @@map("events")
 }
 
@@ -274,6 +279,7 @@ model EventSchedule {
   end_time    String
   location    String?
   pic         String?
+  track       String?
   visibility  String   @default("public")
   sort_order  Int      @default(0)
   created_at  DateTime @default(now())
@@ -299,6 +305,9 @@ model EventTask {
   due_at      String?
   due_date    String?
   progress    Int      @default(0)
+  labels      Json     @default("[]")
+  checklists  Json     @default("[]")
+  created_by  String?
   sort_order  Int      @default(0)
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
@@ -335,6 +344,11 @@ model TicketType {
   currency      String   @default("IDR")
   quantity      Int
   sold_quantity Int      @default(0)
+  category      String?
+  sale_start_at String?
+  sale_end_at   String?
+  benefits      String?
+  terms         String?
   min_per_order Int      @default(1)
   max_per_order Int      @default(5)
   status        String   @default("On Sale")
@@ -359,9 +373,13 @@ model Order {
   subtotal       Float    @default(0)
   total          Float    @default(0)
   currency       String   @default("IDR")
-  order_status   String   @default("Confirmed")
-  payment_status String   @default("Paid")
-  created_at     DateTime @default(now())
+  order_status      String    @default("Confirmed")
+  payment_status    String    @default("Paid")
+  payment_proof_url String?
+  payment_notes     String?
+  verified_by       String?
+  verified_at       DateTime?
+  created_at        DateTime  @default(now())
   updated_at     DateTime @updatedAt
 
   event        Event         @relation(fields: [event_id], references: [id], onDelete: Cascade)
@@ -517,6 +535,7 @@ model Vendor {
   contact_name String?
   email        String?
   phone        String?
+  address      String?
   value        String?
   notes        String?
   status       String   @default("Pending")
@@ -533,6 +552,7 @@ model Sponsor {
   event_id        String
   name            String
   tier            String?
+  logo_url        String?
   category        String?
   contribution    String?
   pic             String?
@@ -553,6 +573,9 @@ model EventDocument {
   uploaded_by String?
   file_name   String
   file_path   String
+  file_type   String?
+  description String?
+  version     Int      @default(1)
   category    String   @default("Operasional")
   visibility  String   @default("internal")
   created_at  DateTime @default(now())
@@ -568,6 +591,7 @@ model EventSurvey {
   event_id    String
   title       String
   description String?
+  questions   Json     @default("[]")
   is_active   Boolean  @default(true)
   responses   Json     @default("[]")
   created_at  DateTime @default(now())
@@ -650,6 +674,7 @@ model ActivityLog {
   user_id         String?
   action          String
   entity_type     String
+  entity_id       String?
   metadata        Json     @default("{}")
   created_at      DateTime @default(now())
 

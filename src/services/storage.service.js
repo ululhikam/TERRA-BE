@@ -12,8 +12,7 @@ const IMAGE_MIME_TYPES = new Set([
   'image/jpg',
   'image/png',
   'image/webp',
-  'image/gif',
-  'image/svg+xml'
+  'image/gif'
 ])
 
 const DOC_MIME_TYPES = new Set([

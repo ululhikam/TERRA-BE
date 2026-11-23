@@ -11,6 +11,25 @@ import {
 import { generateTicketsQrPdfBuffer } from './pdf.service.js'
 import { sendTicketOrderEmail } from './email.service.js'
 
+export async function assertOrderOrEventAccess(user, { customer_id = null, event_id = null }) {
+  if (!user) throw new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED')
+  if (user.role === 'admin') return true
+  if (customer_id && customer_id === user.id) return true
+  if (event_id) {
+    const perms = await db.getUserEventPermissions(user, event_id)
+    if (perms.includes('Manage Tickets') || perms.includes('View Participants') || perms.includes('Manage Check-in')) {
+      return true
+    }
+  }
+  throw new AppError('Anda tidak memiliki izin mengakses resource tiket/order ini.', 403, 'FORBIDDEN')
+}
+
+export async function assertOrderAccessById(orderId, user) {
+  const order = await db.findOrderById(orderId)
+  await assertOrderOrEventAccess(user, order)
+  return order
+}
+
 export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quantity, attendee, user }) {
   if (!(await db.isModuleEnabled(event_id, 'ticketing'))) {
     throw new AppError('Modul ticketing sedang tidak aktif pada event ini.', 403, 'MODULE_DISABLED')
@@ -27,16 +46,25 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   const evt = await db.getEventOrThrow(event_id)
   const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t)))
 
-  const emailStatus = await sendTicketOrderEmail({
-    to: attendee?.email || user.email,
-    customerName: attendee?.full_name || user.full_name,
-    eventTitle: evt?.title || 'TERRA Event',
-    eventDate: evt?.start_at || evt?.start_date || '-',
-    location: evt?.location_name || evt?.venue_name || '-',
-    orderId: result.order?.id,
-    orderNumber: result.order?.order_number,
-    tickets: ticketsWithQr
-  })
+  let emailStatus = {
+    sent: false,
+    delivered_by_provider: false,
+    mode: 'deferred-pending-payment',
+    reason: 'Menunggu verifikasi pembayaran oleh penyelenggara sebelum e-tiket QR diterbitkan.'
+  }
+
+  if (result.order?.order_status === 'Confirmed') {
+    emailStatus = await sendTicketOrderEmail({
+      to: attendee?.email || user.email,
+      customerName: attendee?.full_name || user.full_name,
+      eventTitle: evt?.title || 'TERRA Event',
+      eventDate: evt?.start_at || evt?.start_date || '-',
+      location: evt?.location_name || evt?.venue_name || '-',
+      orderId: result.order?.id,
+      orderNumber: result.order?.order_number,
+      tickets: ticketsWithQr
+    })
+  }
 
   return {
     ...result,
@@ -46,7 +74,36 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   }
 }
 
-export async function listOrderTicketsWithQr(orderId) {
+export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
+  const result = await db.verifyOrderPayment(eventId, orderId, operatorUser)
+  const evt = await db.getEventOrThrow(eventId)
+  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t)))
+
+  const recipientEmail = result.participant?.email || operatorUser?.email
+  const customerName = result.participant?.full_name || 'Peserta TERRA'
+  let emailStatus = null
+  if (recipientEmail) {
+    emailStatus = await sendTicketOrderEmail({
+      to: recipientEmail,
+      customerName,
+      eventTitle: evt?.title || 'TERRA Event',
+      eventDate: evt?.start_at || '-',
+      location: evt?.location_name || '-',
+      orderId: result.order?.id,
+      orderNumber: result.order?.order_number,
+      tickets: ticketsWithQr
+    })
+  }
+
+  return {
+    ...result,
+    tickets: ticketsWithQr,
+    email_status: emailStatus
+  }
+}
+
+export async function listOrderTicketsWithQr(orderId, user = null) {
+  if (user) await assertOrderAccessById(orderId, user)
   const tickets = await db.listTicketsByOrder(orderId)
   return Promise.all(tickets.map((t) => attachTicketQr(t)))
 }
@@ -56,13 +113,25 @@ export async function listMyTicketsWithQr(userId) {
   return Promise.all(tickets.map((t) => attachTicketQr(t)))
 }
 
-export async function findTicketWithQr(ticketId) {
+async function resolveTicketWithOwnerAccess(ticketId, user) {
   const tk = await db.findTicketById(ticketId)
+  if (user) {
+    const order = tk.order_id ? await db.findOrderById(tk.order_id).catch(() => null) : null
+    await assertOrderOrEventAccess(user, {
+      customer_id: order?.customer_id || null,
+      event_id: tk.event_id
+    })
+  }
+  return tk
+}
+
+export async function findTicketWithQr(ticketId, user = null) {
+  const tk = await resolveTicketWithOwnerAccess(ticketId, user)
   return attachTicketQr(tk)
 }
 
-export async function getTicketQrAssets(ticketId) {
-  const tk = await db.findTicketById(ticketId)
+export async function getTicketQrAssets(ticketId, user = null) {
+  const tk = await resolveTicketWithOwnerAccess(ticketId, user)
   const [qr_data_url, qr_svg] = await Promise.all([
     generateTicketQrDataUrl(tk.qr_payload),
     generateTicketQrSvg(tk.qr_payload)
@@ -81,8 +150,15 @@ export async function getTicketQrAssets(ticketId) {
 export async function buildTicketQrPdfDownload({ ticketId, token, user }) {
   const tk = await db.findTicketById(ticketId)
   const tokenValid = verifyQrDownloadToken(token, tk.id)
-  if (!user && !tokenValid) {
-    throw new AppError('Akses unduhan PDF QR tidak valid atau kedaluwarsa.', 401, 'UNAUTHORIZED')
+  if (!tokenValid) {
+    if (!user) {
+      throw new AppError('Akses unduhan PDF QR tidak valid atau kedaluwarsa.', 401, 'UNAUTHORIZED')
+    }
+    const order = tk.order_id ? await db.findOrderById(tk.order_id).catch(() => null) : null
+    await assertOrderOrEventAccess(user, {
+      customer_id: order?.customer_id || null,
+      event_id: tk.event_id
+    })
   }
 
   let event = null
@@ -102,8 +178,11 @@ export async function buildTicketQrPdfDownload({ ticketId, token, user }) {
 export async function buildOrderQrPdfDownload({ orderId, token, user }) {
   const order = await db.findOrderById(orderId)
   const tokenValid = verifyQrDownloadToken(token, order.id)
-  if (!user && !tokenValid) {
-    throw new AppError('Akses unduhan PDF QR tidak valid atau kedaluwarsa.', 401, 'UNAUTHORIZED')
+  if (!tokenValid) {
+    if (!user) {
+      throw new AppError('Akses unduhan PDF QR tidak valid atau kedaluwarsa.', 401, 'UNAUTHORIZED')
+    }
+    await assertOrderOrEventAccess(user, order)
   }
 
   const tickets = await db.listTicketsByOrder(order.id)

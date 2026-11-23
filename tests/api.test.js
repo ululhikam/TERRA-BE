@@ -3,6 +3,7 @@ import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 // Keep integration tests isolated from live production Supabase Postgres & Resend
+process.env.NODE_ENV = 'test'
 process.env.DATABASE_URL = ''
 process.env.DIRECT_URL = ''
 process.env.RESEND_API_KEY = ''
@@ -83,7 +84,14 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       body: { notes: 'Approved for marketplace' }
     })
     assert.equal(approveRes.status, 200)
-    assert.equal(approveRes.data.data.event.publication_status, 'Published')
+    assert.equal(approveRes.data.data.event.publication_status, 'Approved')
+
+    const publishRes = await request('/events/evt-3/publish', {
+      method: 'POST',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(publishRes.status, 200)
+    assert.equal(publishRes.data.data.publication_status, 'Published')
   })
 
   it('enforces module activation, dependency rules, and data preservation', async () => {
@@ -197,16 +205,16 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     assert.equal(duplicateCheckin.status, 409)
     assert.equal(duplicateCheckin.data.error.code, 'DUPLICATE_CHECKIN')
 
-    // Cancel order restores quota
+    // Canceling an order that already has a checked-in ticket must fail with 409 ORDER_ALREADY_USED
     const orderId = orderRes.data.data.order.id
-    const cancelRes = await request(`/orders/${orderId}/cancel`, {
+    const cancelUsedRes = await request(`/orders/${orderId}/cancel`, {
       method: 'POST',
       token: 'demo-token-customer'
     })
-    assert.equal(cancelRes.status, 200)
-    assert.equal(cancelRes.data.data.order_status, 'Cancelled')
+    assert.equal(cancelUsedRes.status, 409)
+    assert.equal(cancelUsedRes.data.error.code, 'ORDER_ALREADY_USED')
 
-    // Also supports flat attendee checkout payload cleanly
+    // Also supports flat attendee checkout payload cleanly and cancels unused order to restore quota
     const flatOrderRes = await request('/orders', {
       method: 'POST',
       token: 'demo-token-customer',
@@ -221,6 +229,13 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     })
     assert.equal(flatOrderRes.status, 201)
     assert.equal(flatOrderRes.data.data.order.order_status, 'Confirmed')
+
+    const cancelUnusedRes = await request(`/orders/${flatOrderRes.data.data.order.id}/cancel`, {
+      method: 'POST',
+      token: 'demo-token-customer'
+    })
+    assert.equal(cancelUnusedRes.status, 200)
+    assert.equal(cancelUnusedRes.data.data.order_status, 'Cancelled')
   })
 
   it('exports participants CSV cleanly', async () => {
@@ -696,7 +711,12 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     assert.equal(emailNotif.sent, true)
     assert.equal(emailNotif.recipient, 'sari@example.com')
 
-    const previewRes = await request(`/emails/${emailNotif.id}/preview`)
+    // Unauthenticated preview without token must return 401
+    const unauthPreview = await request(`/emails/${emailNotif.id}/preview`)
+    assert.equal(unauthPreview.status, 401)
+
+    const signedPreviewPath = emailNotif.preview_url.split('/api/v1')[1]
+    const previewRes = await request(signedPreviewPath)
     assert.equal(previewRes.status, 200)
     assert.ok(previewRes.data.includes('data:image/png;base64,'))
     assert.ok(previewRes.data.includes('Download Semua QR (PDF)'))
@@ -729,5 +749,69 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     })
     assert.equal(validCheckin.status, 200)
     assert.equal(validCheckin.data.data.ticket.status, 'Used')
+  })
+
+  it('enforces Paid Ticket Pending Policy and activates QR on organizer payment verification', async () => {
+    const paidOrder = await request('/orders', {
+      method: 'POST',
+      token: 'demo-token-customer',
+      body: {
+        event_id: 'evt-1',
+        ticket_type_id: 'tkt-vip-1',
+        quantity: 1,
+        attendee: {
+          full_name: 'Raka Pembayar VIP',
+          email: 'raka@example.com',
+          phone: '081288887777',
+          registration_data: { instansi: 'FT UST', kategori: 'VIP' }
+        }
+      }
+    })
+    assert.equal(paidOrder.status, 201)
+    assert.equal(paidOrder.data.data.order.order_status, 'Pending')
+    assert.equal(paidOrder.data.data.order.payment_status, 'Pending')
+    assert.equal(paidOrder.data.data.tickets[0].status, 'Pending')
+    assert.equal(paidOrder.data.data.email_status.sent, false)
+
+    const orderId = paidOrder.data.data.order.id
+    const ticketCode = paidOrder.data.data.tickets[0].ticket_code
+
+    // Pending ticket cannot be checked in
+    const blockedCheckin = await request('/tickets/check-in', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { code: ticketCode, station: 'VIP Gate', event_id: 'evt-1' }
+    })
+    assert.equal(blockedCheckin.status, 409)
+    assert.equal(blockedCheckin.data.error.code, 'TICKET_PAYMENT_PENDING')
+
+    // Customer submits payment proof
+    const proofRes = await request(`/orders/${orderId}/payment-proof`, {
+      method: 'POST',
+      token: 'demo-token-customer',
+      body: { payment_proof_url: 'https://example.com/proof-transfer.png', payment_notes: 'Transfer BCA an Raka' }
+    })
+    assert.equal(proofRes.status, 200)
+    assert.equal(proofRes.data.data.payment_proof_url, 'https://example.com/proof-transfer.png')
+
+    // Organizer verifies payment -> activates order & QR ticket and sends QR email
+    const verifyRes = await request(`/events/evt-1/orders/${orderId}/verify-payment`, {
+      method: 'POST',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(verifyRes.status, 200)
+    assert.equal(verifyRes.data.data.order.order_status, 'Confirmed')
+    assert.equal(verifyRes.data.data.order.payment_status, 'Verified')
+    assert.equal(verifyRes.data.data.tickets[0].status, 'Active')
+    assert.equal(verifyRes.data.data.email_status.sent, true)
+
+    // Check-in succeeds after payment verified
+    const checkinAfter = await request('/tickets/check-in', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { code: ticketCode, station: 'VIP Gate', event_id: 'evt-1' }
+    })
+    assert.equal(checkinAfter.status, 200)
+    assert.equal(checkinAfter.data.data.ticket.status, 'Used')
   })
 })

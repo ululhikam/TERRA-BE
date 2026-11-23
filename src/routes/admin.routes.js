@@ -3,14 +3,17 @@ import { requireAuth } from '../middleware/auth.middleware.js'
 import { requireAdmin } from '../middleware/role.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
 import {
-  moderationNoteSchema,
-  categorySchema,
   adminCreateOrganizerSchema,
-  adminUpdateSubscriptionSchema,
   adminPlanUpdateSchema,
+  adminUpdateSubscriptionSchema,
+  adminUserStatusSchema,
+  billingVerifySchema,
   bundleUpsertSchema,
+  categorySchema,
+  moderationNoteSchema,
   promoUpsertSchema,
-  billingVerifySchema
+  reportStatusSchema,
+  verificationReviewSchema
 } from '../validators/schemas.js'
 import { isSupabaseEnabled, supabaseAdmin } from '../config/supabase.js'
 import { hashPassword } from '../utils/crypto.js'
@@ -30,8 +33,8 @@ router.get('/admin/users', asyncHandler(async (_req, res) => {
   return sendSuccess(res, await db.listAdminUsers())
 }))
 
-router.patch('/admin/users/:id/status', asyncHandler(async (req, res) => {
-  const user = await db.updateAdminUserStatus(req.params.id, req.body?.is_suspended)
+router.patch('/admin/users/:id/status', validateBody(adminUserStatusSchema), asyncHandler(async (req, res) => {
+  const user = await db.updateAdminUserStatus(req.params.id, req.validatedBody.is_suspended)
   return sendSuccess(res, user, 'Status user diperbarui.')
 }))
 
@@ -86,8 +89,13 @@ router.get('/admin/verifications', asyncHandler(async (_req, res) => {
   return sendSuccess(res, await db.listVerifications())
 }))
 
-router.post('/admin/verifications/:id/review', asyncHandler(async (req, res) => {
-  const result = await db.reviewVerification(req.params.id, req.body?.status, req.body?.notes, req.user.id)
+router.post('/admin/verifications/:id/review', validateBody(verificationReviewSchema), asyncHandler(async (req, res) => {
+  const result = await db.reviewVerification(
+    req.params.id,
+    req.validatedBody.status,
+    req.validatedBody.notes,
+    req.user.id
+  )
   const label = result.verification?.verification_status || 'reviewed'
   return sendSuccess(res, result, `Organisasi berhasil di-${label}.`)
 }))
@@ -98,7 +106,12 @@ router.get('/admin/events', asyncHandler(async (_req, res) => {
 
 router.post('/admin/events/:id/approve', validateBody(moderationNoteSchema), asyncHandler(async (req, res) => {
   const result = await db.moderateEvent(req.params.id, 'approve', req.user.id, req.validatedBody?.notes)
-  return sendSuccess(res, result, 'Event berhasil di-approve.')
+  return sendSuccess(res, result, 'Event disetujui (Approved) dan siap dipublikasikan oleh Organizer.')
+}))
+
+router.post('/admin/events/:id/request-revision', validateBody(moderationNoteSchema), asyncHandler(async (req, res) => {
+  const result = await db.moderateEvent(req.params.id, 'request_revision', req.user.id, req.validatedBody?.notes)
+  return sendSuccess(res, result, 'Permintaan revisi dikirim ke Organizer.')
 }))
 
 router.post('/admin/events/:id/reject', validateBody(moderationNoteSchema), asyncHandler(async (req, res) => {
@@ -124,8 +137,8 @@ router.post('/admin/categories', validateBody(categorySchema), asyncHandler(asyn
   return sendSuccess(res, cat, 'Kategori dibuat.', 201)
 }))
 
-router.patch('/admin/categories/:id', asyncHandler(async (req, res) => {
-  const cat = await db.updateCategory(req.params.id, req.body)
+router.patch('/admin/categories/:id', validateBody(categorySchema.partial()), asyncHandler(async (req, res) => {
+  const cat = await db.updateCategory(req.params.id, req.validatedBody)
   return sendSuccess(res, cat, 'Kategori diperbarui.')
 }))
 
@@ -137,9 +150,17 @@ router.get('/admin/reports', asyncHandler(async (_req, res) => {
   return sendSuccess(res, await db.listReports())
 }))
 
-router.patch('/admin/reports/:id', asyncHandler(async (req, res) => {
-  const rep = await db.updateReportStatus(req.params.id, req.body?.status || 'resolved', req.user.id)
+router.patch('/admin/reports/:id', validateBody(reportStatusSchema), asyncHandler(async (req, res) => {
+  const rep = await db.updateReportStatus(req.params.id, req.validatedBody.status, req.user.id)
   return sendSuccess(res, rep, 'Laporan diperbarui.')
+}))
+
+router.get('/admin/orders', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listAdminOrders())
+}))
+
+router.get('/admin/activity-logs', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listAdminActivityLogs())
 }))
 
 // ---------------- PLATFORM ADMIN PRICING & BILLING ----------------

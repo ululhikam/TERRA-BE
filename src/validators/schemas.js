@@ -58,11 +58,13 @@ export const scheduleItemSchema = z.object({
   end_time: z.string().min(1),
   location: z.string().optional().default('Main Stage'),
   pic: z.string().optional().default(''),
+  track: z.string().optional().default(''),
   visibility: z.enum(['public', 'internal']).default('public')
 })
 
 export const eventCreateSchema = z.object({
   organization_id: z.string().min(1),
+  parent_event_id: z.string().nullable().optional(),
   title: z.string().min(3),
   slug: z.string().min(3).optional(),
   description: z.string().optional(),
@@ -79,17 +81,27 @@ export const eventCreateSchema = z.object({
   end_at: z.string().min(1),
   timezone: z.string().default('Asia/Jakarta'),
   capacity: z.coerce.number().int().min(0).default(100),
-  visibility: z.enum(['public', 'private', 'unlisted']).default('public')
+  visibility: z.enum(['public', 'private', 'unlisted']).default('public'),
+  theme_color: z.string().optional()
 })
 
-export const eventUpdateSchema = eventCreateSchema.partial().extend({
-  status: z.enum(['Draft', 'Preparation', 'Published', 'Ongoing', 'Completed', 'Cancelled']).optional(),
-  publication_status: z.enum(['Unpublished', 'Pending Review', 'Approved', 'Rejected', 'Published', 'Suspended']).optional(),
-  terms: z.string().optional(),
-  contact_email: z.string().optional(),
-  contact_phone: z.string().optional(),
-  speakers: z.array(speakerItemSchema).optional(),
-  schedules: z.array(scheduleItemSchema).optional()
+export const eventUpdateSchema = eventCreateSchema
+  .omit({ organization_id: true })
+  .partial()
+  .extend({
+    status: z.enum(['Draft', 'Preparation', 'Published', 'Ongoing', 'Completed', 'Cancelled']).optional(),
+    terms: z.string().optional(),
+    contact_email: z.string().optional(),
+    contact_phone: z.string().optional(),
+    speakers: z.array(speakerItemSchema).optional(),
+    schedules: z.array(scheduleItemSchema).optional(),
+    faq: z.array(z.object({ q: z.string().min(1), a: z.string().min(1) })).optional()
+  })
+
+export const organizationUpdateSchema = organizationCreateSchema.partial()
+
+export const organizationMemberUpdateSchema = z.object({
+  role: z.enum(['Owner', 'Admin', 'Manager', 'Staff', 'Viewer'])
 })
 
 export const moduleConfigSchema = z.object({
@@ -109,6 +121,7 @@ export const scheduleSchema = z.object({
   end_time: z.string().min(1),
   location: z.string().optional(),
   pic: z.string().optional(),
+  track: z.string().optional(),
   visibility: z.enum(['public', 'internal']).default('public')
 })
 
@@ -132,7 +145,25 @@ export const taskSchema = z.object({
   start_date: z.string().optional(),
   due_at: z.string().optional(),
   due_date: z.string().optional(),
-  progress: z.coerce.number().int().min(0).max(100).default(0)
+  progress: z.coerce.number().int().min(0).max(100).default(0),
+  labels: z.array(z.string()).optional(),
+  checklists: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        title: z.string().min(1),
+        is_completed: z.boolean().default(false)
+      })
+    )
+    .optional()
+})
+
+export const taskCommentSchema = z.object({
+  content: z.string().trim().min(1, 'Isi komentar wajib diisi.').max(1000)
+})
+
+export const taskUpdateSchema = taskSchema.partial().extend({
+  shift_days: z.coerce.number().int().optional()
 })
 
 export const teamMemberSchema = z.object({
@@ -146,11 +177,14 @@ export const teamMemberSchema = z.object({
 export const ticketTypeSchema = z.object({
   name: z.string().min(2),
   description: z.string().optional(),
+  category: z.string().optional(),
   price: z.coerce.number().min(0).default(0),
   currency: z.string().default('IDR'),
   quantity: z.coerce.number().int().min(1),
   sale_start_at: z.string().optional(),
   sale_end_at: z.string().optional(),
+  benefits: z.string().optional(),
+  terms: z.string().optional(),
   min_per_order: z.coerce.number().int().min(1).default(1),
   max_per_order: z.coerce.number().int().min(1).default(5),
   status: z.enum(['Draft', 'Scheduled', 'On Sale', 'Sold Out', 'Sales Ended', 'Disabled']).default('On Sale')
@@ -160,12 +194,14 @@ export const orderCreateSchema = z
   .object({
     event_id: z.string().min(1),
     ticket_type_id: z.string().min(1),
-    quantity: z.coerce.number().int().min(1).max(10),
+    quantity: z.coerce.number().int().min(1).max(20),
+    registration_data: z.record(z.any()).optional(),
     attendee: z
       .object({
         full_name: z.string().min(2),
         email: z.string().email(),
-        phone: z.string().min(6)
+        phone: z.string().min(6),
+        registration_data: z.record(z.any()).optional()
       })
       .optional(),
     full_name: z.string().min(2).optional(),
@@ -186,6 +222,7 @@ export const orderCreateSchema = z
     event_id: val.event_id,
     ticket_type_id: val.ticket_type_id,
     quantity: val.quantity,
+    registration_data: val.registration_data || val.attendee?.registration_data || {},
     attendee: val.attendee || {
       full_name: val.full_name,
       email: val.email,
@@ -224,6 +261,11 @@ export const vendorSchema = z.object({
   name: z.string().min(2),
   category: z.string().min(2),
   contact: z.string().optional(),
+  contact_name: z.string().optional(),
+  email: z.string().optional(),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  notes: z.string().optional(),
   value: z.string().optional(),
   status: z.enum(['Pending', 'Confirmed', 'Completed', 'Cancelled']).default('Pending')
 })
@@ -231,9 +273,28 @@ export const vendorSchema = z.object({
 export const sponsorSchema = z.object({
   name: z.string().min(2),
   tier: z.string().min(2),
+  logo_url: z.string().optional(),
   contribution: z.string().optional(),
   pic: z.string().optional(),
+  benefits: z.string().optional(),
+  contact_details: z.string().optional(),
   status: z.enum(['Pending', 'Confirmed', 'Cancelled']).default('Pending')
+})
+
+export const surveyCreateSchema = z.object({
+  title: z.string().min(2),
+  description: z.string().optional().default(''),
+  questions: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        question: z.string().min(1),
+        question_type: z.enum(['text', 'rating', 'multiple_choice']).default('text'),
+        options: z.array(z.string()).optional().default([])
+      })
+    )
+    .optional()
+    .default([])
 })
 
 export const moderationNoteSchema = z.object({
@@ -243,7 +304,33 @@ export const moderationNoteSchema = z.object({
 export const categorySchema = z.object({
   name: z.string().min(2),
   description: z.string().optional(),
-  icon: z.string().optional()
+  icon: z.string().optional(),
+  image_url: z.string().optional(),
+  sort_order: z.coerce.number().int().min(0).optional(),
+  is_active: z.boolean().optional()
+})
+
+export const adminUserStatusSchema = z.object({
+  is_suspended: z.boolean()
+})
+
+export const verificationReviewSchema = z.object({
+  status: z.enum(['verified', 'rejected', 'request_documents']),
+  notes: z.string().optional().default('')
+})
+
+export const reportStatusSchema = z.object({
+  status: z.enum(['open', 'in_review', 'resolved', 'dismissed'])
+})
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email('Format email tidak valid')
+})
+
+export const resetPasswordSchema = z.object({
+  email: z.string().email('Format email tidak valid'),
+  otp_code: z.string().trim().regex(/^\d{6}$/, 'Kode OTP reset harus 6 digit angka'),
+  new_password: z.string().min(6, 'Kata sandi baru minimal 6 karakter')
 })
 
 export const reportCreateSchema = z.object({

@@ -37,6 +37,10 @@ router.get('/marketplace/events/:slug', asyncHandler(async (req, res) => {
   return sendSuccess(res, await db.getPublicEventBySlugOrId(req.params.slug))
 }))
 
+router.get('/marketplace/events/:slug/surveys', asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listPublicSurveysByEvent(req.params.slug))
+}))
+
 router.get('/marketplace/organizers/:slug', asyncHandler(async (req, res) => {
   return sendSuccess(res, await db.getPublicOrganizerBySlug(req.params.slug))
 }))

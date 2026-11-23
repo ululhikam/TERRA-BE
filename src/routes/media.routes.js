@@ -45,12 +45,23 @@ router.delete(
   '/media',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const filePath = req.body?.path || req.query?.path
-    const bucket = req.body?.bucket || req.query?.bucket || env.supabaseMediaBucket
+    const filePath = String(req.body?.path || req.query?.path || '').trim()
+    const bucket = String(req.body?.bucket || req.query?.bucket || env.supabaseMediaBucket).trim()
     if (!filePath) {
       throw new AppError('Parameter path wajib diisi.', 400, 'PATH_REQUIRED')
     }
-    await deleteStorageObject(String(filePath), String(bucket))
+    const allowedBuckets = [env.supabaseMediaBucket, env.supabaseDocsBucket]
+    if (!allowedBuckets.includes(bucket)) {
+      throw new AppError('Bucket storage tidak diizinkan.', 403, 'FORBIDDEN_BUCKET')
+    }
+    if (req.user?.role !== 'admin') {
+      const segments = filePath.split('/')
+      const isOwnerSegment = segments.includes(String(req.user?.id || ''))
+      if (!isOwnerSegment) {
+        throw new AppError('Akses ditolak: Anda hanya dapat menghapus file milik Anda sendiri.', 403, 'FORBIDDEN_MEDIA_DELETE')
+      }
+    }
+    await deleteStorageObject(filePath, bucket)
     return sendSuccess(res, { path: filePath, bucket }, 'File dihapus dari Supabase Storage.')
   })
 )

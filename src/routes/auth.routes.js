@@ -7,10 +7,12 @@ import { validateBody } from '../middleware/validate.middleware.js'
 import {
   acceptInviteSchema,
   changeUnverifiedEmailSchema,
+  forgotPasswordSchema,
   loginSchema,
   profileUpdateSchema,
   registerSchema,
   resendOtpSchema,
+  resetPasswordSchema,
   verifyOtpSchema
 } from '../validators/schemas.js'
 import { isSupabaseEnabled, supabaseAdmin, supabasePublic } from '../config/supabase.js'
@@ -113,7 +115,9 @@ function decodeOAuthState(stateStr) {
     const parsed = JSON.parse(Buffer.from(String(stateStr), 'base64url').toString('utf8'))
     return {
       origin: resolveFrontendOrigin(parsed.origin),
-      next: typeof parsed.next === 'string' && parsed.next.startsWith('/') ? parsed.next : '/events'
+      next: typeof parsed.next === 'string' && parsed.next.startsWith('/') && !parsed.next.startsWith('//')
+        ? parsed.next
+        : '/events'
     }
   } catch {
     return { origin: env.frontendUrl, next: '/events' }
@@ -171,6 +175,9 @@ router.post('/auth/login', validateBody(loginSchema), asyncHandler(async (req, r
     }
 
     const actualRole = stored?.role || data.user.user_metadata?.role || portal_role
+    if (stored?.is_suspended) {
+      throw new AppError('Akun Anda sedang ditangguhkan oleh Administrator.', 403, 'ACCOUNT_SUSPENDED')
+    }
     if (portal_role === 'admin' && actualRole !== 'admin') {
       throw new AppError('Akun ini tidak memiliki akses Platform Administrator.', 403, 'FORBIDDEN_PORTAL')
     }
@@ -202,6 +209,9 @@ router.post('/auth/login', validateBody(loginSchema), asyncHandler(async (req, r
   // Server-side local/fallback mode
   const existing = (await db.findUserByEmail(email, portal_role)) || (await db.findUserByEmail(email))
   if (existing) {
+    if (existing.is_suspended) {
+      throw new AppError('Akun Anda sedang ditangguhkan oleh Administrator.', 403, 'ACCOUNT_SUSPENDED')
+    }
     if (existing.password_hash && !verifyPassword(password, existing.password_hash)) {
       throw new AppError('Email atau kata sandi salah.', 401, 'INVALID_CREDENTIALS')
     }
@@ -417,8 +427,8 @@ router.post('/auth/verify-otp', validateBody(verifyOtpSchema), asyncHandler(asyn
 router.post('/auth/resend-otp', validateBody(resendOtpSchema), asyncHandler(async (req, res) => {
   const { email, otp_session_token } = req.validatedBody
 
-  const sess = otp_session_token ? verifyOtpSessionToken(otp_session_token) : null
-  if (otp_session_token && !sess) {
+  const sess = verifyOtpSessionToken(otp_session_token)
+  if (!sess) {
     throw new AppError('Sesi verifikasi tidak valid atau kedaluwarsa. Silakan login ulang untuk mendapatkan sesi baru.', 401, 'INVALID_OTP_SESSION')
   }
 
@@ -545,6 +555,75 @@ router.post('/auth/logout', (_req, res) => {
   return sendSuccess(res, { logged_out: true }, 'Sesi berhasil diakhiri.')
 })
 
+router.post('/auth/forgot-password', validateBody(forgotPasswordSchema), asyncHandler(async (req, res) => {
+  const email = req.validatedBody.email.trim().toLowerCase()
+  const user = await db.findUserByEmail(email)
+  if (!user) {
+    return sendSuccess(
+      res,
+      { requested: true },
+      'Jika email terdaftar, kode OTP reset kata sandi telah dikirimkan.'
+    )
+  }
+
+  const otpCode = generateOtpCode()
+  const otpExpiresAt = new Date(Date.now() + OTP_TTL_MS)
+  await db.setUserOtp(
+    user.id,
+    {
+      otpCodeHash: hashOtpCode(otpCode),
+      otpExpiresAt
+    },
+    user.role
+  )
+
+  const emailStatus = await sendOtpEmail({
+    to: user.email,
+    fullName: user.full_name,
+    otpCode,
+    purpose: 'Reset Kata Sandi Akun TERRA'
+  })
+
+  return sendSuccess(
+    res,
+    {
+      requested: true,
+      email_status: emailStatus,
+      expires_in_seconds: Math.floor(OTP_TTL_MS / 1000)
+    },
+    emailStatus.sent
+      ? 'Kode OTP reset kata sandi telah dikirim ke email Anda.'
+      : 'Kode reset dibuat. Periksa konfigurasi pengiriman email.'
+  )
+}))
+
+router.post('/auth/reset-password', validateBody(resetPasswordSchema), asyncHandler(async (req, res) => {
+  const { email, otp_code, new_password } = req.validatedBody
+  const cleanEmail = email.trim().toLowerCase()
+  const user = await db.findUserByEmail(cleanEmail)
+  if (!user || !user.otp_code_hash) {
+    throw new AppError('Kode OTP reset tidak valid atau belum diminta.', 400, 'INVALID_OTP')
+  }
+  if (user.otp_expires_at && new Date(user.otp_expires_at).getTime() < Date.now()) {
+    throw new AppError('Kode OTP reset sudah kedaluwarsa.', 400, 'OTP_EXPIRED')
+  }
+  if (Number(user.otp_attempts || 0) >= OTP_MAX_ATTEMPTS) {
+    throw new AppError('Terlalu banyak percobaan OTP gagal. Minta kode OTP baru.', 429, 'OTP_MAX_ATTEMPTS')
+  }
+
+  if (hashOtpCode(otp_code) !== user.otp_code_hash) {
+    await db.incrementOtpAttempts(user.id, user.role)
+    throw new AppError('Kode OTP reset tidak sesuai.', 400, 'INVALID_OTP')
+  }
+
+  if (isSupabaseEnabled && supabaseAdmin && user.id && !String(user.id).startsWith('usr-') && !String(user.id).startsWith('orgu-')) {
+    await supabaseAdmin.auth.admin.updateUserById(user.id, { password: new_password }).catch(() => {})
+  }
+
+  await db.resetUserPassword(user.id, hashPassword(new_password), user.role)
+  return sendSuccess(res, { reset: true }, 'Kata sandi berhasil diperbarui. Silakan login dengan kata sandi baru.')
+}))
+
 router.get('/auth/me', requireAuth, asyncHandler(async (req, res) => {
   const user = (await db.findUserByIdOrEmail(req.user.id, req.user.email, req.user.role)) || req.user
   const orgs = await db.listOrganizationsForUser(user)
@@ -582,7 +661,9 @@ router.get('/auth/oauth/status', (_req, res) => {
 router.get('/auth/google', (req, res, next) => {
   const origin = resolveFrontendOrigin(req.query.origin)
   const nextPath =
-    typeof req.query.next === 'string' && req.query.next.startsWith('/') ? req.query.next : '/events'
+    typeof req.query.next === 'string' && req.query.next.startsWith('/') && !req.query.next.startsWith('//')
+      ? req.query.next
+      : '/events'
 
   if (!isGoogleOAuthEnabled) {
     return res.redirect(

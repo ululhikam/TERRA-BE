@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
-import { requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
+import { requireEventPermission, requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
 import { billingCheckoutSchema, billingPreviewSchema } from '../validators/schemas.js'
 import { uploadBufferToStorage, uploadSingleFile } from '../services/storage.service.js'
@@ -21,24 +21,24 @@ router.post('/pricing/preview', validateBody(billingPreviewSchema), asyncHandler
 }))
 
 // Per-event subscription entitlement, 14 Days Pro Access Trial, bundle credit & downgrade
-router.get('/events/:id/subscription', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+router.get('/events/:id/subscription', requireAuth, requireOrganizerOrAdmin, requireEventPermission('View Event'), asyncHandler(async (req, res) => {
   const entitlement = await pricingDb.ensureEventEntitlement(req.params.id)
   return sendSuccess(res, entitlement)
 }))
 
-router.post('/events/:id/subscription/trial', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+router.post('/events/:id/subscription/trial', requireAuth, requireOrganizerOrAdmin, requireEventPermission('Edit Event'), asyncHandler(async (req, res) => {
   const entitlement = await pricingDb.activateEventTrial(req.params.id, req.user)
   return sendSuccess(res, entitlement, '14 Days Pro Access berhasil diaktifkan untuk event ini!', 201)
 }))
 
-router.post('/events/:id/subscription/apply-bundle', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+router.post('/events/:id/subscription/apply-bundle', requireAuth, requireOrganizerOrAdmin, requireEventPermission('Edit Event'), asyncHandler(async (req, res) => {
   const creditId = req.body?.bundle_credit_id
   if (!creditId) throw new AppError('Pilih paket bundle credit terlebih dahulu.', 400, 'BUNDLE_CREDIT_REQUIRED')
   const entitlement = await pricingDb.applyBundleCreditToEvent(req.params.id, creditId, req.user)
   return sendSuccess(res, entitlement, 'Kuota bundle berhasil diterapkan ke event ini.')
 }))
 
-router.post('/events/:id/subscription/downgrade', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+router.post('/events/:id/subscription/downgrade', requireAuth, requireOrganizerOrAdmin, requireEventPermission('Edit Event'), asyncHandler(async (req, res) => {
   const targetPlan = req.body?.plan_code || 'free'
   const entitlement = await pricingDb.downgradeEventPlan(req.params.id, targetPlan, req.user)
   return sendSuccess(res, entitlement, `Paket event diturunkan ke ${entitlement.plan_name}. Semua data historis tetap tersimpan.`)
@@ -84,7 +84,7 @@ router.post(
         originalName: req.file.originalname,
         mimeType: req.file.mimetype,
         folder: 'payment-proofs',
-        bucketType: 'media',
+        bucketType: 'documents',
         ownerId: req.user.id
       })
       proofUrl = uploaded.public_url || uploaded.path

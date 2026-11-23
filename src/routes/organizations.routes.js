@@ -1,8 +1,13 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
-import { requireOrganizerOrAdmin, requireOrgMembership } from '../middleware/role.middleware.js'
+import { requireOrganizerOrAdmin, requireOrgMembership, requireOrgRole } from '../middleware/role.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
-import { organizationCreateSchema, organizationMemberSchema } from '../validators/schemas.js'
+import {
+  organizationCreateSchema,
+  organizationMemberSchema,
+  organizationMemberUpdateSchema,
+  organizationUpdateSchema
+} from '../validators/schemas.js'
 import * as db from '../repositories/db.js'
 import { sendSuccess, asyncHandler } from '../utils/response.js'
 
@@ -23,19 +28,24 @@ router.get('/organizations/:id', requireAuth, requireOrgMembership, asyncHandler
   return sendSuccess(res, org)
 }))
 
-router.patch('/organizations/:id', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
-  const org = await db.updateOrganization(req.params.id, req.body)
+router.patch('/organizations/:id', requireAuth, requireOrgRole('Owner', 'Admin'), validateBody(organizationUpdateSchema), asyncHandler(async (req, res) => {
+  const org = await db.updateOrganization(req.params.id, req.validatedBody, req.user.id)
   return sendSuccess(res, org, 'Organisasi diperbarui.')
 }))
 
-router.delete('/organizations/:id', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+router.delete('/organizations/:id', requireAuth, requireOrgRole('Owner'), asyncHandler(async (req, res) => {
   const result = await db.deleteOrganization(req.params.id)
   return sendSuccess(res, result, 'Organisasi dihapus.')
 }))
 
-router.post('/organizations/:id/verification', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+router.post('/organizations/:id/verification', requireAuth, requireOrgRole('Owner', 'Admin'), asyncHandler(async (req, res) => {
   const ver = await db.createOrgVerification(req.params.id, req.user.id, req.body?.documents || [])
   return sendSuccess(res, ver, 'Pengajuan verifikasi dikirim ke Admin.', 201)
+}))
+
+router.get('/organizations/:id/activity-logs', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+  const logs = await db.listOrganizationActivityLogs(req.params.id)
+  return sendSuccess(res, logs)
 }))
 
 router.get('/organizations/:id/members', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
@@ -43,17 +53,17 @@ router.get('/organizations/:id/members', requireAuth, requireOrgMembership, asyn
   return sendSuccess(res, org.members || [])
 }))
 
-router.post('/organizations/:id/members', requireAuth, requireOrgMembership, validateBody(organizationMemberSchema), asyncHandler(async (req, res) => {
+router.post('/organizations/:id/members', requireAuth, requireOrgRole('Owner', 'Admin'), validateBody(organizationMemberSchema), asyncHandler(async (req, res) => {
   const member = await db.addOrganizationMember(req.params.id, req.validatedBody)
   return sendSuccess(res, member, 'Anggota organisasi ditambahkan.', 201)
 }))
 
-router.patch('/organizations/:id/members/:memberId', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
-  const member = await db.updateOrganizationMember(req.params.id, req.params.memberId, req.body)
+router.patch('/organizations/:id/members/:memberId', requireAuth, requireOrgRole('Owner', 'Admin'), validateBody(organizationMemberUpdateSchema), asyncHandler(async (req, res) => {
+  const member = await db.updateOrganizationMember(req.params.id, req.params.memberId, req.validatedBody)
   return sendSuccess(res, member, 'Role anggota diperbarui.')
 }))
 
-router.delete('/organizations/:id/members/:memberId', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+router.delete('/organizations/:id/members/:memberId', requireAuth, requireOrgRole('Owner', 'Admin'), asyncHandler(async (req, res) => {
   const result = await db.removeOrganizationMember(req.params.id, req.params.memberId)
   return sendSuccess(res, result, 'Anggota dihapus dari organisasi.')
 }))
