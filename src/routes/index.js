@@ -23,6 +23,7 @@ router.get('/health', async (_req, res) => {
   res.json({
     success: true,
     message: 'TERRA API v1 is healthy',
+    version: '1.1.0',
     environment: env.nodeEnv,
     database,
     supabase,
