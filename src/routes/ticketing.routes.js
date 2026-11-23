@@ -1,15 +1,22 @@
 import { Router } from 'express'
-import { requireAuth } from '../middleware/auth.middleware.js'
+import { requireAuth, optionalAuth } from '../middleware/auth.middleware.js'
 import {
   getUserEventPermissions,
   requireEventPermission,
   requireOrganizerOrAdmin
 } from '../middleware/role.middleware.js'
 import { requireEventModule } from '../middleware/module.middleware.js'
-import { validateBody } from '../middleware/validate.middleware.js'
-import { ticketTypeSchema, orderCreateSchema, checkinSchema } from '../validators/schemas.js'
+import { validateBody, validateQuery } from '../middleware/validate.middleware.js'
+import {
+  ticketTypeSchema,
+  ticketTypeUpdateSchema,
+  orderCreateSchema,
+  checkinSchema,
+  qrDownloadQuerySchema
+} from '../validators/schemas.js'
 import * as db from '../repositories/db.js'
-import { sendTicketOrderEmail } from '../services/email.service.js'
+import * as ticketingService from '../services/ticketing.service.js'
+import { getEmailPreviewById, getEmailPreviewByOrderId } from '../services/email.service.js'
 import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
@@ -24,8 +31,8 @@ router.post('/events/:id/ticket-types', requireAuth, requireOrganizerOrAdmin, re
   return sendSuccess(res, item, 'Jenis tiket dibuat.', 201)
 }))
 
-router.patch('/ticket-types/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
-  const tkt = await db.updateTicketType(req.params.id, req.body)
+router.patch('/ticket-types/:id', requireAuth, requireOrganizerOrAdmin, validateBody(ticketTypeUpdateSchema), asyncHandler(async (req, res) => {
+  const tkt = await db.updateTicketType(req.params.id, req.validatedBody)
   return sendSuccess(res, tkt, 'Jenis tiket diperbarui.')
 }))
 
@@ -47,25 +54,11 @@ router.get('/orders/:id', requireAuth, asyncHandler(async (req, res) => {
 }))
 
 router.post('/orders', requireAuth, validateBody(orderCreateSchema), asyncHandler(async (req, res) => {
-  if (!(await db.isModuleEnabled(req.validatedBody.event_id, 'ticketing'))) {
-    throw new AppError('Modul ticketing sedang tidak aktif pada event ini.', 403, 'MODULE_DISABLED')
-  }
-  const result = await db.createOrder({
+  const result = await ticketingService.createOrderWithQrAndEmail({
     ...req.validatedBody,
-    customer_id: req.user.id
+    user: req.user
   })
-  const evt = await db.getEventOrThrow(req.validatedBody.event_id)
-  const emailStatus = await sendTicketOrderEmail({
-    to: req.validatedBody.email || req.validatedBody.attendee?.email || req.user.email,
-    customerName:
-      req.validatedBody.full_name || req.validatedBody.attendee?.full_name || req.user.full_name,
-    eventTitle: evt?.title || 'TERRA Event',
-    eventDate: evt?.start_at || evt?.start_date || '-',
-    location: evt?.location_name || evt?.venue_name || '-',
-    orderNumber: result.order.order_number,
-    tickets: result.tickets || []
-  })
-  return sendSuccess(res, { ...result, email_status: emailStatus }, 'Pesanan berhasil dibuat.', 201)
+  return sendSuccess(res, result, 'Pesanan berhasil dibuat dan email QR telah dikirim.', 201)
 }))
 
 router.post('/orders/:id/cancel', requireAuth, asyncHandler(async (req, res) => {
@@ -73,22 +66,64 @@ router.post('/orders/:id/cancel', requireAuth, asyncHandler(async (req, res) => 
   return sendSuccess(res, order, 'Pesanan dibatalkan dan kuota tiket dikembalikan.')
 }))
 
+// Email Preview & PDF QR Downloads (Accessible via Auth or Signed Email Token)
+router.get('/orders/:id/email-preview', requireAuth, (req, res) => {
+  return sendSuccess(res, getEmailPreviewByOrderId(req.params.id))
+})
+
+router.get('/emails/:id/preview', (req, res) => {
+  const email = getEmailPreviewById(req.params.id)
+  res.setHeader('Content-Type', 'text/html; charset=utf-8')
+  return res.status(200).send(email.html)
+})
+
+router.get(
+  '/orders/:id/qr-pdf',
+  optionalAuth,
+  validateQuery(qrDownloadQuerySchema),
+  asyncHandler(async (req, res) => {
+    const { buffer, filename } = await ticketingService.buildOrderQrPdfDownload({
+      orderId: req.params.id,
+      token: req.validatedQuery.token,
+      user: req.user
+    })
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    return res.status(200).send(buffer)
+  })
+)
+
+router.get(
+  '/tickets/:id/qr-pdf',
+  optionalAuth,
+  validateQuery(qrDownloadQuerySchema),
+  asyncHandler(async (req, res) => {
+    const { buffer, filename } = await ticketingService.buildTicketQrPdfDownload({
+      ticketId: req.params.id,
+      token: req.validatedQuery.token,
+      user: req.user
+    })
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    return res.status(200).send(buffer)
+  })
+)
+
 // Digital Tickets & Check-in Scanner
 router.get('/orders/:id/tickets', requireAuth, asyncHandler(async (req, res) => {
-  return sendSuccess(res, await db.listTicketsByOrder(req.params.id))
+  return sendSuccess(res, await ticketingService.listOrderTicketsWithQr(req.params.id))
 }))
 
 router.get('/tickets/my', requireAuth, asyncHandler(async (req, res) => {
-  return sendSuccess(res, await db.listTicketsByCustomer(req.user.id))
+  return sendSuccess(res, await ticketingService.listMyTicketsWithQr(req.user.id))
 }))
 
 router.get('/tickets/:id', requireAuth, asyncHandler(async (req, res) => {
-  return sendSuccess(res, await db.findTicketById(req.params.id))
+  return sendSuccess(res, await ticketingService.findTicketWithQr(req.params.id))
 }))
 
 router.get('/tickets/:id/qr', requireAuth, asyncHandler(async (req, res) => {
-  const tk = await db.findTicketById(req.params.id)
-  return sendSuccess(res, { ticket_code: tk.ticket_code, qr_payload: tk.qr_payload, status: tk.status })
+  return sendSuccess(res, await ticketingService.getTicketQrAssets(req.params.id))
 }))
 
 async function assertTicketCheckinPermission(user, code) {
@@ -108,7 +143,13 @@ async function assertTicketCheckinPermission(user, code) {
 
 router.post('/tickets/validate', requireAuth, requireOrganizerOrAdmin, validateBody(checkinSchema), asyncHandler(async (req, res) => {
   await assertTicketCheckinPermission(req.user, req.validatedBody.code)
-  const result = await db.validateOrCheckIn(req.validatedBody.code, req.validatedBody.station, req.user.id, false)
+  const result = await db.validateOrCheckIn(
+    req.validatedBody.code,
+    req.validatedBody.station,
+    req.user.id,
+    false,
+    req.validatedBody.event_id || null
+  )
   return sendSuccess(res, result, 'Tiket valid dan siap untuk check-in.')
 }))
 
@@ -118,7 +159,13 @@ router.get('/events/:id/check-ins', requireAuth, requireOrganizerOrAdmin, requir
 
 router.post('/tickets/check-in', requireAuth, requireOrganizerOrAdmin, validateBody(checkinSchema), asyncHandler(async (req, res) => {
   await assertTicketCheckinPermission(req.user, req.validatedBody.code)
-  const result = await db.validateOrCheckIn(req.validatedBody.code, req.validatedBody.station, req.user.id, true)
+  const result = await db.validateOrCheckIn(
+    req.validatedBody.code,
+    req.validatedBody.station,
+    req.user.id,
+    true,
+    req.validatedBody.event_id || null
+  )
   return sendSuccess(res, result, 'Check-in berhasil.')
 }))
 

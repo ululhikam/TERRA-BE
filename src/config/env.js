@@ -4,7 +4,9 @@ export const env = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  appBaseUrl: (process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/+$/, ''),
   frontendUrl: (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, ''),
+  qrSigningSecret: (process.env.QR_SIGNING_SECRET || 'terra-dev-qr-signing-secret-2026').trim(),
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
@@ -18,6 +20,12 @@ export const env = {
     process.env.EMAIL_FROM ||
     'TERRA Events <onboarding@resend.dev>'
   ).trim(),
+  smtpHost: (process.env.SMTP_HOST || '').trim(),
+  smtpPort: Number(process.env.SMTP_PORT || 587),
+  smtpSecure: process.env.SMTP_SECURE === 'true',
+  smtpUser: (process.env.SMTP_USER || '').trim(),
+  smtpPass: (process.env.SMTP_PASS || '').trim(),
+  smtpFrom: (process.env.SMTP_FROM || process.env.RESEND_FROM_EMAIL || 'TERRA Tickets <tickets@terra.id>').trim(),
   googleClientId: (process.env.GOOGLE_CLIENT_ID || '').trim(),
   googleClientSecret: (process.env.GOOGLE_CLIENT_SECRET || '').trim(),
   googleCallbackUrl: (

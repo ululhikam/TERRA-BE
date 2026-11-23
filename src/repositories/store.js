@@ -6,6 +6,7 @@ import {
   hashQrToken,
   slugify
 } from '../utils/crypto.js'
+import { parseTicketQrPayload } from '../utils/qrcode.js'
 
 export const MODULE_CATALOG = [
   { key: 'event_profile', name: 'Event Profile', isCore: true, dependsOn: [] },
@@ -769,6 +770,7 @@ class BackendStore {
         created_at: '2026-11-17T08:30:00Z'
       }
     ]
+    this.emailOutbox = []
     this.notifications = [
       { id: 'ntf-1', user_id: 'usr-organizer', title: 'Event Disetujui', message: 'Indonesia Fullstack & AI Summit 2026 telah dipublikasikan di marketplace.', is_read: false, created_at: '2026-11-16T09:00:00Z' }
     ]
@@ -1297,17 +1299,31 @@ class BackendStore {
     return order
   }
 
-  validateOrCheckIn(codeOrQr, station, operatorId, commitCheckIn = true) {
-    const raw = String(codeOrQr).trim()
-    const cleanCode = raw.includes('TERRA:') ? raw.split(':')[1] : raw
+  validateOrCheckIn(codeOrQr, station, operatorId, commitCheckIn = true, eventId = null) {
+    const parsed = parseTicketQrPayload(codeOrQr)
+    const raw = parsed.raw
+    const cleanCode = parsed.ticketCode
     const hashed = hashQrToken(raw)
 
     const ticket = this.tickets.find(
-      (t) => t.ticket_code.toUpperCase() === cleanCode.toUpperCase() || t.qr_token_hash === hashed
+      (t) =>
+        (cleanCode && t.ticket_code.toUpperCase() === cleanCode) ||
+        t.qr_token_hash === hashed ||
+        (t.qr_payload && t.qr_payload === raw)
     )
 
     if (!ticket) {
-      throw new AppError(`Tiket "${cleanCode}" tidak ditemukan atau tidak valid.`, 404, 'TICKET_NOT_FOUND')
+      throw new AppError(`Tiket "${cleanCode || raw}" tidak ditemukan atau tidak valid.`, 404, 'TICKET_NOT_FOUND')
+    }
+    if (parsed.isTerraQr && parsed.eventId && ticket.event_id !== parsed.eventId) {
+      throw new AppError('Payload QR Code tidak sesuai dengan event tiket.', 400, 'INVALID_QR_PAYLOAD')
+    }
+    if (eventId && ticket.event_id !== eventId) {
+      throw new AppError(
+        `Tiket ${ticket.ticket_code} terdaftar untuk event lain dan tidak berlaku di gate ini.`,
+        409,
+        'WRONG_EVENT_TICKET'
+      )
     }
     if (ticket.status === 'Cancelled') {
       throw new AppError('Tiket telah dibatalkan dan tidak berlaku.', 409, 'TICKET_CANCELLED')

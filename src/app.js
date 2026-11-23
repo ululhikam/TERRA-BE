@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit'
 import { env } from './config/env.js'
 import passport from './config/passport.js'
 import apiV1Router from './routes/index.js'
+import { requestLogger } from './middleware/logger.middleware.js'
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js'
 
 const app = express()
@@ -54,6 +55,7 @@ app.use(
 
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
+app.use(requestLogger)
 app.use(passport.initialize())
 
 // Root health check

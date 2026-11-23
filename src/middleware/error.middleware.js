@@ -1,6 +1,9 @@
 import multer from 'multer'
 import { Prisma } from '@prisma/client'
-import { AppError } from '../utils/response.js'
+import { ZodError } from 'zod'
+import { env } from '../config/env.js'
+import { logger } from '../utils/logger.js'
+import { AppError, sendError } from '../utils/response.js'
 
 export function notFoundHandler(req, _res, next) {
   next(new AppError(`Endpoint ${req.method} ${req.originalUrl} tidak ditemukan.`, 404, 'ROUTE_NOT_FOUND'))
@@ -41,29 +44,59 @@ function mapPrismaError(err) {
   return null
 }
 
-export function errorHandler(err, _req, res, _next) {
+export function errorHandler(err, req, res, _next) {
   if (err instanceof multer.MulterError) {
     const isTooLarge = err.code === 'LIMIT_FILE_SIZE'
-    return res.status(isTooLarge ? 413 : 400).json({
-      success: false,
-      error: {
-        code: isTooLarge ? 'FILE_TOO_LARGE' : 'UPLOAD_ERROR',
-        message: isTooLarge ? 'Ukuran file maksimal 4MB.' : err.message,
-        details: []
-      }
+    return sendError(res, {
+      statusCode: isTooLarge ? 413 : 400,
+      code: isTooLarge ? 'FILE_TOO_LARGE' : 'UPLOAD_ERROR',
+      message: isTooLarge ? 'Ukuran file maksimal 4MB.' : err.message,
+      details: []
     })
   }
-  const mapped = mapPrismaError(err)
-  const statusCode = mapped?.statusCode || err.statusCode || 500
-  const code = mapped?.code || err.code || 'INTERNAL_SERVER_ERROR'
-  const message = mapped?.message || err.message || 'Terjadi kesalahan pada server.'
 
-  return res.status(statusCode).json({
-    success: false,
-    error: {
+  const mapped = mapPrismaError(err)
+  let statusCode = mapped?.statusCode || err.statusCode || 500
+  let code = mapped?.code || err.code || 'INTERNAL_SERVER_ERROR'
+  let message = mapped?.message || err.message || 'Terjadi kesalahan pada server.'
+  let details = err.details || []
+
+  if (err instanceof ZodError) {
+    statusCode = 422
+    code = 'VALIDATION_ERROR'
+    message = 'Data input tidak valid.'
+    details = err.issues.map((i) => ({ path: i.path.join('.'), message: i.message }))
+  } else if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    statusCode = 400
+    code = 'INVALID_JSON'
+    message = 'Payload JSON tidak valid atau rusak.'
+  } else if (typeof message === 'string' && message.includes('CORS policy')) {
+    statusCode = 403
+    code = 'CORS_FORBIDDEN'
+  }
+
+  if (statusCode >= 500) {
+    logger.error('Unhandled server error', {
+      requestId: res.locals?.requestId,
+      method: req.method,
+      path: req.originalUrl,
       code,
-      message,
-      details: err.details || []
+      errorMessage: message,
+      stack: env.nodeEnv === 'production' ? undefined : err.stack
+    })
+    if (env.nodeEnv === 'production') {
+      message = 'Terjadi kesalahan internal pada server.'
     }
-  })
+  } else {
+    logger.warn('Operational request error', {
+      requestId: res.locals?.requestId,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode,
+      code,
+      errorMessage: message
+    })
+  }
+
+  return sendError(res, { statusCode, code, message, details })
 }

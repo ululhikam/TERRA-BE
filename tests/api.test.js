@@ -43,8 +43,15 @@ async function request(path, { method = 'GET', token = null, body = null } = {})
     body: body ? JSON.stringify(body) : undefined
   })
   const contentType = res.headers.get('content-type') || ''
-  const data = contentType.includes('application/json') ? await res.json() : await res.text()
-  return { status: res.status, data }
+  let data
+  if (contentType.includes('application/json')) {
+    data = await res.json()
+  } else if (contentType.includes('application/pdf')) {
+    data = Buffer.from(await res.arrayBuffer())
+  } else {
+    data = await res.text()
+  }
+  return { status: res.status, headers: res.headers, data }
 }
 
 describe('TERRA Backend API v1 Integration Tests', () => {
@@ -652,5 +659,75 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       token: 'demo-token-organizer'
     })
     assert.equal(spDel.status, 200)
+  })
+
+  it('generates QR code & downloadable PDF QR email on ticket purchase and enforces event check-in scan validation', async () => {
+    const orderRes = await request('/orders', {
+      method: 'POST',
+      token: 'demo-token-customer',
+      body: {
+        event_id: 'evt-1',
+        ticket_type_id: 'tkt-1',
+        quantity: 2,
+        attendee: {
+          full_name: 'Sari QR Tester',
+          email: 'sari@example.com',
+          phone: '081233445566'
+        }
+      }
+    })
+    assert.equal(orderRes.status, 201)
+    assert.ok(orderRes.headers.get('x-request-id'))
+    assert.ok(orderRes.data.requestId)
+    assert.equal(orderRes.data.data.tickets.length, 2)
+
+    const ticket = orderRes.data.data.tickets[0]
+    assert.ok(ticket.qr_payload.startsWith(`TERRA:${ticket.ticket_code}:evt-1`))
+    assert.ok(ticket.qr_data_url.startsWith('data:image/png;base64,'))
+
+    // QR assets endpoint
+    const qrRes = await request(`/tickets/${ticket.id}/qr`, { token: 'demo-token-customer' })
+    assert.equal(qrRes.status, 200)
+    assert.ok(qrRes.data.data.qr_data_url.startsWith('data:image/png;base64,'))
+    assert.ok(qrRes.data.data.qr_svg.includes('<svg'))
+
+    // Email QR preview & signed PDF QR download from email link
+    const emailNotif = orderRes.data.data.email_notification
+    assert.equal(emailNotif.sent, true)
+    assert.equal(emailNotif.recipient, 'sari@example.com')
+
+    const previewRes = await request(`/emails/${emailNotif.id}/preview`)
+    assert.equal(previewRes.status, 200)
+    assert.ok(previewRes.data.includes('data:image/png;base64,'))
+    assert.ok(previewRes.data.includes('Download Semua QR (PDF)'))
+
+    const pdfMatch = previewRes.data.match(/\/api\/v1(\/orders\/[^"']+qr-pdf\?token=[^"']+)/)
+    assert.ok(pdfMatch)
+    const pdfRes = await request(pdfMatch[1])
+    assert.equal(pdfRes.status, 200)
+    assert.ok(pdfRes.headers.get('content-type').includes('application/pdf'))
+    assert.equal(pdfRes.data.subarray(0, 5).toString('utf8'), '%PDF-')
+
+    // Unauthorized PDF download rejected
+    const unauthPdf = await request(`/orders/${orderRes.data.data.order.id}/qr-pdf`)
+    assert.equal(unauthPdf.status, 401)
+
+    // Wrong event check-in rejected
+    const wrongEvent = await request('/tickets/validate', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { code: ticket.qr_payload, station: 'Gate A - Main Lobby', event_id: 'evt-2' }
+    })
+    assert.equal(wrongEvent.status, 409)
+    assert.equal(wrongEvent.data.error.code, 'WRONG_EVENT_TICKET')
+
+    // Valid QR scan check-in succeeds
+    const validCheckin = await request('/tickets/check-in', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { code: ticket.qr_payload, station: 'Gate A - Main Lobby', event_id: 'evt-1' }
+    })
+    assert.equal(validCheckin.status, 200)
+    assert.equal(validCheckin.data.data.ticket.status, 'Used')
   })
 })

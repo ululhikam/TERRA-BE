@@ -195,8 +195,15 @@ export const orderCreateSchema = z
 
 export const checkinSchema = z.object({
   code: z.string().min(3),
-  station: z.string().default('Gate A - Main Lobby')
+  station: z.string().default('Gate A - Main Lobby'),
+  event_id: z.string().optional()
 })
+
+export const qrDownloadQuerySchema = z.object({
+  token: z.string().optional()
+})
+
+export const ticketTypeUpdateSchema = ticketTypeSchema.partial()
 
 export const participantCreateSchema = z.object({
   full_name: z.string().min(2),

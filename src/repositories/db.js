@@ -8,6 +8,7 @@ import {
   generateTicketCode,
   hashQrToken
 } from '../utils/crypto.js'
+import { parseTicketQrPayload } from '../utils/qrcode.js'
 import { AppError } from '../utils/response.js'
 
 export const ALL_EVENT_PERMISSIONS = [
@@ -1644,21 +1645,29 @@ export async function findTicketById(id) {
 }
 
 export async function findTicketEventIdByCode(code) {
-  const raw = String(code || '').trim()
-  const cleanCode = raw.includes('TERRA:') ? raw.split(':')[1] : raw
+  const parsed = parseTicketQrPayload(code)
+  const raw = parsed.raw
+  const cleanCode = parsed.ticketCode
+  const hashed = hashQrToken(raw)
   if (!usePrisma()) {
     return (
       store.tickets.find(
-        (t) => t.ticket_code.toUpperCase() === cleanCode.toUpperCase() || t.qr_token_hash === code || t.id === code
+        (t) =>
+          (cleanCode && t.ticket_code.toUpperCase() === cleanCode) ||
+          t.qr_token_hash === hashed ||
+          t.qr_token_hash === raw ||
+          t.qr_payload === raw ||
+          t.id === raw
       )?.event_id || null
     )
   }
   const tk = await prisma.ticket.findFirst({
     where: {
       OR: [
-        { ticket_code: { equals: cleanCode, mode: 'insensitive' } },
-        { qr_token_hash: code },
-        { id: code }
+        ...(cleanCode ? [{ ticket_code: { equals: cleanCode, mode: 'insensitive' } }] : []),
+        { qr_token_hash: hashed },
+        { qr_token_hash: raw },
+        { id: raw }
       ]
     },
     select: { event_id: true }
@@ -1671,24 +1680,36 @@ export async function listCheckins(eventId) {
   return prisma.checkinLog.findMany({ where: { event_id: eventId } })
 }
 
-export async function validateOrCheckIn(codeOrQr, station, operatorId, commitCheckIn = true) {
-  if (!usePrisma()) return store.validateOrCheckIn(codeOrQr, station, operatorId, commitCheckIn)
+export async function validateOrCheckIn(codeOrQr, station, operatorId, commitCheckIn = true, eventId = null) {
+  if (!usePrisma()) return store.validateOrCheckIn(codeOrQr, station, operatorId, commitCheckIn, eventId)
 
-  const raw = String(codeOrQr).trim()
-  const cleanCode = raw.includes('TERRA:') ? raw.split(':')[1] : raw
+  const parsed = parseTicketQrPayload(codeOrQr)
+  const raw = parsed.raw
+  const cleanCode = parsed.ticketCode
   const hashed = hashQrToken(raw)
 
   return runTransaction(async (tx) => {
     const ticket = await tx.ticket.findFirst({
       where: {
         OR: [
-          { ticket_code: { equals: cleanCode, mode: 'insensitive' } },
-          { qr_token_hash: hashed }
+          ...(cleanCode ? [{ ticket_code: { equals: cleanCode, mode: 'insensitive' } }] : []),
+          { qr_token_hash: hashed },
+          { qr_payload: raw }
         ]
       }
     })
     if (!ticket) {
-      throw new AppError(`Tiket "${cleanCode}" tidak ditemukan atau tidak valid.`, 404, 'TICKET_NOT_FOUND')
+      throw new AppError(`Tiket "${cleanCode || raw}" tidak ditemukan atau tidak valid.`, 404, 'TICKET_NOT_FOUND')
+    }
+    if (parsed.isTerraQr && parsed.eventId && ticket.event_id !== parsed.eventId) {
+      throw new AppError('Payload QR Code tidak sesuai dengan event tiket.', 400, 'INVALID_QR_PAYLOAD')
+    }
+    if (eventId && ticket.event_id !== eventId) {
+      throw new AppError(
+        `Tiket ${ticket.ticket_code} terdaftar untuk event lain dan tidak berlaku di gate ini.`,
+        409,
+        'WRONG_EVENT_TICKET'
+      )
     }
     if (ticket.status === 'Cancelled') {
       throw new AppError('Tiket telah dibatalkan dan tidak berlaku.', 409, 'TICKET_CANCELLED')
