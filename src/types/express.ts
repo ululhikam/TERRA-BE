@@ -1,4 +1,5 @@
 import 'express'
+import 'passport'
 import type { AuthUser } from './domain.js'
 
 declare global {
