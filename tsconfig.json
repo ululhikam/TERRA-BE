@@ -14,8 +14,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "types": ["node"]
+    "isolatedModules": true
   },
   "include": [
     "api/**/*.ts",
