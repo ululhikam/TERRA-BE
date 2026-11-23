@@ -11,6 +11,7 @@ process.env.RESEND_API_KEY = ''
 const { default: app } = await import('../src/app.js')
 const { store } = await import('../src/repositories/store.js')
 const { signOAuthToken } = await import('../src/config/passport.js')
+const { buildTicketQrEmailHtml, mapResendAttachments } = await import('../src/services/email.service.js')
 
 let server
 let baseUrl
@@ -47,7 +48,7 @@ async function request(path, { method = 'GET', token = null, body = null } = {})
   let data
   if (contentType.includes('application/json')) {
     data = await res.json()
-  } else if (contentType.includes('application/pdf')) {
+  } else if (contentType.includes('application/pdf') || contentType.includes('image/png')) {
     data = Buffer.from(await res.arrayBuffer())
   } else {
     data = await res.text()
@@ -705,6 +706,17 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     assert.equal(qrRes.status, 200)
     assert.ok(qrRes.data.data.qr_data_url.startsWith('data:image/png;base64,'))
     assert.ok(qrRes.data.data.qr_svg.includes('<svg'))
+    assert.ok(qrRes.data.data.qr_image_url.includes(`/tickets/${ticket.id}/qr-image?token=`))
+
+    // Signed QR PNG image endpoint + unauthorized check
+    const unauthImg = await request(`/tickets/${ticket.id}/qr-image`)
+    assert.equal(unauthImg.status, 401)
+
+    const qrImgPath = qrRes.data.data.qr_image_url.split('/api/v1')[1]
+    const qrImgRes = await request(qrImgPath)
+    assert.equal(qrImgRes.status, 200)
+    assert.equal(qrImgRes.headers.get('content-type'), 'image/png')
+    assert.deepEqual([...qrImgRes.data.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
 
     // Email QR preview & signed PDF QR download from email link
     const emailNotif = orderRes.data.data.email_notification
@@ -718,7 +730,9 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     const signedPreviewPath = emailNotif.preview_url.split('/api/v1')[1]
     const previewRes = await request(signedPreviewPath)
     assert.equal(previewRes.status, 200)
+    assert.ok(previewRes.headers.get('content-security-policy')?.includes('frame-ancestors'))
     assert.ok(previewRes.data.includes('data:image/png;base64,'))
+    assert.ok(previewRes.data.includes('/qr-image?token='))
     assert.ok(previewRes.data.includes('Download Semua QR (PDF)'))
 
     const pdfMatch = previewRes.data.match(/\/api\/v1(\/orders\/[^"']+qr-pdf\?token=[^"']+)/)
@@ -813,5 +827,70 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     })
     assert.equal(checkinAfter.status, 200)
     assert.equal(checkinAfter.data.data.ticket.status, 'Used')
+  })
+
+  it('builds Resend-compatible CID inline QR email HTML and preserves attachment contentId', () => {
+    const buf = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    const mapped = mapResendAttachments([
+      {
+        filename: 'qr-TKT-01.png',
+        content: buf,
+        contentType: 'image/png',
+        cid: 'qr-1-tkt01'
+      },
+      {
+        filename: 'tiket.pdf',
+        content: Buffer.from('%PDF-1.4'),
+        contentType: 'application/pdf'
+      }
+    ])
+
+    assert.equal(mapped.length, 2)
+    assert.equal(mapped[0].contentType, 'image/png')
+    assert.equal(mapped[0].contentId, 'qr-1-tkt01')
+    assert.equal(mapped[1].contentType, 'application/pdf')
+    assert.equal(mapped[1].contentId, undefined)
+
+    const tickets = [
+      {
+        id: 'tkt-sample-1',
+        ticket_code: 'TKT-01',
+        ticket_type: 'Regular',
+        participant_name: 'Bestan',
+        event_title: 'DEMAFEST 2026'
+      }
+    ]
+    const qrImages = [
+      {
+        cid: 'qr-1-tktsample1',
+        dataUrl: 'data:image/png;base64,FAKE_BASE64',
+        qrImageUrl: 'https://backend-six-sand-66.vercel.app/api/v1/tickets/tkt-sample-1/qr-image?token=123.abc'
+      }
+    ]
+
+    const cidHtml = buildTicketQrEmailHtml({
+      customerName: 'Bestan',
+      eventTitle: 'DEMAFEST 2026',
+      orderNumber: 'ORD-01',
+      tickets,
+      qrImages,
+      orderPdfUrl: 'https://backend-six-sand-66.vercel.app/api/v1/orders/ord-1/qr-pdf?token=123.abc',
+      useCidImages: true
+    })
+    assert.ok(cidHtml.includes('src="cid:qr-1-tktsample1"'))
+    assert.ok(!cidHtml.includes('data:image/png;base64,'))
+    assert.ok(cidHtml.includes('/api/v1/tickets/tkt-sample-1/qr-image?token=123.abc'))
+
+    const previewHtml = buildTicketQrEmailHtml({
+      customerName: 'Bestan',
+      eventTitle: 'DEMAFEST 2026',
+      orderNumber: 'ORD-01',
+      tickets,
+      qrImages,
+      orderPdfUrl: 'https://backend-six-sand-66.vercel.app/api/v1/orders/ord-1/qr-pdf?token=123.abc',
+      useCidImages: false
+    })
+    assert.ok(previewHtml.includes('src="data:image/png;base64,FAKE_BASE64"'))
+    assert.ok(!previewHtml.includes('src="cid:'))
   })
 })

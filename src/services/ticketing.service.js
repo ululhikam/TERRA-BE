@@ -4,6 +4,7 @@ import { AppError } from '../utils/response.js'
 import {
   attachTicketQr,
   createQrDownloadToken,
+  generateTicketQrBuffer,
   generateTicketQrDataUrl,
   generateTicketQrSvg,
   verifyQrDownloadToken
@@ -142,9 +143,28 @@ export async function getTicketQrAssets(ticketId, user = null) {
     qr_payload: tk.qr_payload,
     qr_data_url,
     qr_svg,
+    qr_image_url: `${env.appBaseUrl}/api/v1/tickets/${encodeURIComponent(tk.id)}/qr-image?token=${token}`,
     pdf_download_url: `${env.appBaseUrl}/api/v1/tickets/${encodeURIComponent(tk.id)}/qr-pdf?token=${token}`,
     status: tk.status
   }
+}
+
+export async function buildTicketQrImageDownload({ ticketId, token, user }) {
+  const tk = await db.findTicketById(ticketId)
+  const tokenValid = verifyQrDownloadToken(token, tk.id)
+  if (!tokenValid) {
+    if (!user) {
+      throw new AppError('Akses gambar QR tidak valid atau kedaluwarsa.', 401, 'UNAUTHORIZED')
+    }
+    const order = tk.order_id ? await db.findOrderById(tk.order_id).catch(() => null) : null
+    await assertOrderOrEventAccess(user, {
+      customer_id: order?.customer_id || null,
+      event_id: tk.event_id
+    })
+  }
+
+  const buffer = await generateTicketQrBuffer(tk.qr_payload, { width: 320, margin: 2 })
+  return { buffer, filename: `qr-${tk.ticket_code}.png` }
 }
 
 export async function buildTicketQrPdfDownload({ ticketId, token, user }) {

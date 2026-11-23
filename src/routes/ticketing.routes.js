@@ -152,9 +152,32 @@ router.get('/emails/:id/preview', optionalAuth, asyncHandler(async (req, res) =>
       throw new AppError('Anda tidak memiliki izin mengakses pratinjau email ini.', 403, 'FORBIDDEN')
     }
   }
+  res.removeHeader('X-Frame-Options')
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self' 'unsafe-inline'; img-src 'self' data: https:; frame-ancestors 'self' https://terra-concern.vercel.app https://*.vercel.app http://localhost:5173;"
+  )
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   return res.status(200).send(email.html)
 }))
+
+router.get(
+  '/tickets/:id/qr-image',
+  optionalAuth,
+  validateQuery(qrDownloadQuerySchema),
+  asyncHandler(async (req, res) => {
+    const { buffer, filename } = await ticketingService.buildTicketQrImageDownload({
+      ticketId: req.params.id,
+      token: req.validatedQuery.token,
+      user: req.user
+    })
+    res.setHeader('Content-Type', 'image/png')
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`)
+    res.setHeader('Cache-Control', 'private, max-age=86400')
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+    return res.status(200).send(buffer)
+  })
+)
 
 router.get(
   '/orders/:id/qr-pdf',

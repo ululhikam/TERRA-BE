@@ -39,6 +39,15 @@ export function getEmailConfigStatus() {
   }
 }
 
+export function mapResendAttachments(attachments = []) {
+  return (attachments || []).map((att) => ({
+    filename: att.filename,
+    content: att.content,
+    ...(att.contentType ? { contentType: att.contentType } : {}),
+    ...(att.contentId || att.cid ? { contentId: att.contentId || att.cid } : {})
+  }))
+}
+
 export async function sendEmail({ to, subject, html, attachments = [] }) {
   if (resend && isResendConfigured) {
     try {
@@ -49,10 +58,7 @@ export async function sendEmail({ to, subject, html, attachments = [] }) {
         html
       }
       if (attachments.length) {
-        payload.attachments = attachments.map((att) => ({
-          filename: att.filename,
-          content: att.content
-        }))
+        payload.attachments = mapResendAttachments(attachments)
       }
       const { data, error } = await resend.emails.send(payload)
 
@@ -172,7 +178,7 @@ export async function sendTeamInviteEmail({
   })
 }
 
-function buildTicketQrEmailHtml({
+export function buildTicketQrEmailHtml({
   customerName,
   eventTitle,
   orderNumber,
@@ -183,9 +189,13 @@ function buildTicketQrEmailHtml({
 }) {
   const cardsHtml = tickets
     .map((ticket, idx) => {
-      const imgSrc = useCidImages ? `cid:${qrImages[idx].cid}` : qrImages[idx].dataUrl
+      const qrInfo = qrImages[idx] || {}
+      const imgSrc = useCidImages ? `cid:${qrInfo.cid}` : qrInfo.dataUrl
       const ticketToken = createQrDownloadToken(ticket.id)
       const ticketPdfUrl = `${env.appBaseUrl}/api/v1/tickets/${encodeURIComponent(ticket.id)}/qr-pdf?token=${ticketToken}`
+      const ticketImgUrl =
+        qrInfo.qrImageUrl ||
+        `${env.appBaseUrl}/api/v1/tickets/${encodeURIComponent(ticket.id)}/qr-image?token=${ticketToken}`
 
       return `
         <div style="margin: 18px 0; padding: 20px; border: 2px solid #000000; border-radius: 16px; background: #ffffff; text-align: center;">
@@ -205,12 +215,22 @@ function buildTicketQrEmailHtml({
           <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 700; color: #000000; margin-bottom: 12px;">
             ${escapeHtml(ticket.ticket_code)}
           </div>
-          <a
-            href="${ticketPdfUrl}"
-            style="display: inline-block; padding: 9px 18px; border: 1.5px solid #000000; border-radius: 9999px; background: #72a5e4; color: #000000; font-size: 12px; font-weight: 700; text-decoration: none;"
-          >
-            Download PDF QR Tiket Ini
-          </a>
+          <div style="margin-bottom: 8px;">
+            <a
+              href="${ticketPdfUrl}"
+              style="display: inline-block; padding: 9px 18px; border: 1.5px solid #000000; border-radius: 9999px; background: #72a5e4; color: #000000; font-size: 12px; font-weight: 700; text-decoration: none;"
+            >
+              Download PDF QR Tiket Ini
+            </a>
+          </div>
+          <div>
+            <a
+              href="${ticketImgUrl}"
+              style="font-size: 11px; font-weight: 600; color: #0f172a; text-decoration: underline;"
+            >
+              Buka Gambar QR (PNG)
+            </a>
+          </div>
         </div>
       `
     })
@@ -281,16 +301,20 @@ export async function sendTicketOrderEmail({
     : ''
 
   const qrImages = await Promise.all(
-    tickets.map(async (ticket) => {
+    tickets.map(async (ticket, idx) => {
       const payload = ticket.qr_payload || buildTicketQrPayload(ticket.ticket_code, ticket.event_id, '')
       const [buffer, dataUrl] = await Promise.all([
         generateTicketQrBuffer(payload, { width: 300, margin: 2 }),
         generateTicketQrDataUrl(payload, { width: 300, margin: 2 })
       ])
+      const safeId = String(ticket.id || idx).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48)
+      const ticketToken = createQrDownloadToken(ticket.id)
+      const qrImageUrl = `${env.appBaseUrl}/api/v1/tickets/${encodeURIComponent(ticket.id)}/qr-image?token=${ticketToken}`
       return {
         ticketId: ticket.id,
         ticketCode: ticket.ticket_code,
-        cid: `qr-${ticket.id}@terra.id`,
+        cid: `qr-${idx + 1}-${safeId}`,
+        qrImageUrl,
         buffer,
         dataUrl
       }
@@ -318,27 +342,31 @@ export async function sendTicketOrderEmail({
   const subject = `[TERRA] QR Tiket Anda: ${eventTitle} (${orderNumber})`
   const previewUrl = `${env.appBaseUrl}/api/v1/emails/${emailId}/preview?token=${previewToken}`
   const pdfFilename = `tiket-qr-${orderNumber}.pdf`
+  const canSendCidInline = isResendConfigured || isSmtpConfigured
+  const deliveryHtml = canSendCidInline
+    ? buildTicketQrEmailHtml({
+        customerName,
+        eventTitle,
+        orderNumber,
+        tickets,
+        qrImages,
+        orderPdfUrl,
+        useCidImages: true
+      })
+    : previewHtml
 
   const delivery = await sendEmail({
     to,
     subject,
-    html: isSmtpConfigured && !isResendConfigured
-      ? buildTicketQrEmailHtml({
-          customerName,
-          eventTitle,
-          orderNumber,
-          tickets,
-          qrImages,
-          orderPdfUrl,
-          useCidImages: true
-        })
-      : previewHtml,
+    html: deliveryHtml,
     attachments: [
-      ...(isSmtpConfigured && !isResendConfigured
+      ...(canSendCidInline
         ? qrImages.map((qr) => ({
             filename: `qr-${qr.ticketCode}.png`,
             content: qr.buffer,
-            cid: qr.cid
+            contentType: 'image/png',
+            cid: qr.cid,
+            contentId: qr.cid
           }))
         : []),
       {
