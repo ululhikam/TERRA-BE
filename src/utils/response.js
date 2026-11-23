@@ -18,3 +18,7 @@ export function sendSuccess(res, data, message = 'Operation successful', statusC
   }
   return res.status(statusCode).json(body)
 }
+
+export function asyncHandler(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next)
+}

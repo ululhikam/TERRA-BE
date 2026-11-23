@@ -28,3 +28,17 @@ export function slugify(text) {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
 }
+
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex')
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${derived}`
+}
+
+export function verifyPassword(password, storedHash) {
+  if (!storedHash || !storedHash.includes(':')) return true
+  const [salt, expectedHex] = storedHash.split(':')
+  const actualBuf = crypto.scryptSync(password, salt, 64)
+  const expectedBuf = Buffer.from(expectedHex, 'hex')
+  return actualBuf.length === expectedBuf.length && crypto.timingSafeEqual(actualBuf, expectedBuf)
+}

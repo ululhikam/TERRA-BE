@@ -12,25 +12,38 @@ const isValidHttpUrl = (str) => {
 
 export const isSupabaseEnabled = Boolean(
   env.supabaseUrl &&
-    env.supabaseServiceRoleKey &&
-    isValidHttpUrl(env.supabaseUrl) &&
-    !env.supabaseUrl.includes('your-project') &&
-    !env.supabaseServiceRoleKey.includes('your-service')
+  env.supabaseServiceRoleKey &&
+  isValidHttpUrl(env.supabaseUrl) &&
+  !env.supabaseUrl.includes('your-project') &&
+  !env.supabaseServiceRoleKey.includes('your-service')
 )
 
 export const supabaseAdmin = isSupabaseEnabled
   ? createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false }
-    })
+    auth: { autoRefreshToken: false, persistSession: false }
+  })
   : null
 
 export const supabasePublic =
   isSupabaseEnabled &&
-  env.supabaseAnonKey &&
-  !env.supabaseAnonKey.includes('your-supabase')
+    env.supabaseAnonKey &&
+    !env.supabaseAnonKey.includes('your-supabase')
     ? createClient(env.supabaseUrl, env.supabaseAnonKey, {
-        auth: { autoRefreshToken: false, persistSession: false }
-      })
+      auth: { autoRefreshToken: false, persistSession: false }
+    })
+    : null
+
+export const supabaseOAuth =
+  isSupabaseEnabled &&
+    env.supabaseAnonKey &&
+    !env.supabaseAnonKey.includes('your-supabase')
+    ? createClient(env.supabaseUrl, env.supabaseAnonKey, {
+      auth: {
+        flowType: 'implicit',
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
     : null
 
 export async function checkSupabaseHealth() {
@@ -38,7 +51,7 @@ export async function checkSupabaseHealth() {
     return { configured: false, connected: false, mode: 'in-memory-fallback' }
   }
   try {
-    const { error } = await supabaseAdmin.from('events').select('id', { count: 'exact', head: true })
+    const { error } = await supabaseAdmin.from('events').select('id').limit(1)
     if (error) {
       return { configured: true, connected: false, mode: 'supabase-schema-pending', error: error.message }
     }

@@ -1,7 +1,15 @@
+import crypto from 'node:crypto'
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import app from '../src/app.js'
-import { store } from '../src/repositories/store.js'
+
+// Keep integration tests isolated from live production Supabase Postgres & Resend
+process.env.DATABASE_URL = ''
+process.env.DIRECT_URL = ''
+process.env.RESEND_API_KEY = ''
+
+const { default: app } = await import('../src/app.js')
+const { store } = await import('../src/repositories/store.js')
+const { signOAuthToken } = await import('../src/config/passport.js')
 
 let server
 let baseUrl
@@ -44,6 +52,7 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     const health = await request('/health')
     assert.equal(health.status, 200)
     assert.equal(health.data.success, true)
+    assert.equal(health.data.database.orm, 'prisma')
 
     const mkt = await request('/marketplace/events')
     assert.equal(mkt.status, 200)
@@ -189,6 +198,22 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     })
     assert.equal(cancelRes.status, 200)
     assert.equal(cancelRes.data.data.order_status, 'Cancelled')
+
+    // Also supports flat attendee checkout payload cleanly
+    const flatOrderRes = await request('/orders', {
+      method: 'POST',
+      token: 'demo-token-customer',
+      body: {
+        event_id: 'evt-1',
+        ticket_type_id: 'tkt-1',
+        quantity: 1,
+        full_name: 'Sari Flat Checkout',
+        email: 'sari@example.com',
+        phone: '08123456789'
+      }
+    })
+    assert.equal(flatOrderRes.status, 201)
+    assert.equal(flatOrderRes.data.data.order.order_status, 'Confirmed')
   })
 
   it('exports participants CSV cleanly', async () => {
@@ -200,33 +225,432 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     assert.ok(csvRes.data.includes('EVT26-9841-AB'))
   })
 
-  it('handles server-side login, register, and portal role isolation via Express API', async () => {
-    const uniqueEmail = `peserta-${Date.now()}@terra.id`
+  it('enforces OTP email verification on manual register, blocks unverified login, and allows changing email', async () => {
+    const initialEmail = `peserta-${Date.now()}@terra.id`
+    const fixedEmail = `peserta-fixed-${Date.now()}@terra.id`
     const regRes = await request('/auth/register', {
       method: 'POST',
       body: {
         full_name: 'Peserta Baru Server',
-        email: uniqueEmail,
+        email: initialEmail,
         password: 'password123',
         role: 'customer'
       }
     })
     assert.equal(regRes.status, 201)
-    assert.equal(regRes.data.data.user.email, uniqueEmail)
-    assert.ok(regRes.data.data.access_token)
+    assert.equal(regRes.data.data.user.email, initialEmail)
+    assert.equal(regRes.data.data.requires_otp, true)
+    assert.equal(regRes.data.data.access_token, undefined)
+    let otpToken = regRes.data.data.otp_session_token
+    assert.ok(otpToken)
 
-    const loginOk = await request('/auth/login', {
-      method: 'POST',
-      body: { email: uniqueEmail, password: 'password123', portal_role: 'customer' }
-    })
-    assert.equal(loginOk.status, 200)
-    assert.ok(loginOk.data.data.access_token)
+    try {
+      // Unverified user MUST be blocked from logging in
+      const blockedLogin = await request('/auth/login', {
+        method: 'POST',
+        body: { email: initialEmail, password: 'password123', portal_role: 'customer' }
+      })
+      assert.equal(blockedLogin.status, 403)
+      assert.equal(blockedLogin.data.error.code, 'EMAIL_NOT_VERIFIED')
 
-    // Customer cannot log into Admin portal
-    const forbiddenPortal = await request('/auth/login', {
+      // Change unverified email to fixedEmail
+      const changeRes = await request('/auth/change-unverified-email', {
+        method: 'POST',
+        body: {
+          current_email: initialEmail,
+          new_email: fixedEmail,
+          otp_session_token: otpToken
+        }
+      })
+      assert.equal(changeRes.status, 200)
+      assert.equal(changeRes.data.data.email, fixedEmail)
+      otpToken = changeRes.data.data.otp_session_token
+
+      // Set deterministic OTP hash in in-memory store to verify /auth/verify-otp flow
+      const createdUser = store.users.find((u) => u.email === fixedEmail)
+      assert.ok(createdUser)
+      createdUser.otp_code_hash = crypto.createHash('sha256').update('654321').digest('hex')
+      createdUser.otp_expires_at = new Date(Date.now() + 600000)
+
+      // Wrong OTP fails with 400
+      const wrongOtp = await request('/auth/verify-otp', {
+        method: 'POST',
+        body: { email: fixedEmail, otp_code: '000000', otp_session_token: otpToken }
+      })
+      assert.equal(wrongOtp.status, 400)
+      assert.equal(wrongOtp.data.error.code, 'INVALID_OTP')
+
+      // Correct OTP verifies user and returns access_token
+      const verifyOk = await request('/auth/verify-otp', {
+        method: 'POST',
+        body: { email: fixedEmail, otp_code: '654321', otp_session_token: otpToken }
+      })
+      assert.equal(verifyOk.status, 200)
+      assert.equal(verifyOk.data.data.verified, true)
+      assert.equal(verifyOk.data.data.user.email_verified, true)
+      assert.ok(verifyOk.data.data.access_token)
+
+      // Now login succeeds
+      const loginOk = await request('/auth/login', {
+        method: 'POST',
+        body: { email: fixedEmail, password: 'password123', portal_role: 'customer' }
+      })
+      assert.equal(loginOk.status, 200)
+      assert.ok(loginOk.data.data.access_token)
+
+      // Customer cannot log into Admin portal
+      const forbiddenPortal = await request('/auth/login', {
+        method: 'POST',
+        body: { email: fixedEmail, password: 'password123', portal_role: 'admin' }
+      })
+      assert.equal(forbiddenPortal.status, 403)
+    } finally {
+      if (regRes.data.data.mode?.startsWith('supabase') && regRes.data.data.user?.id) {
+        const { supabaseAdmin } = await import('../src/config/supabase.js')
+        await supabaseAdmin?.auth?.admin?.deleteUser(regRes.data.data.user.id)
+      }
+    }
+  })
+
+  it('supports EO team invitation, Resend status, accept-invite, and enforces organizer permissions', async () => {
+    const inviteEmail = `panitia-${Date.now()}@terra.id`
+    const inviteRes = await request('/events/evt-1/team', {
       method: 'POST',
-      body: { email: uniqueEmail, password: 'password123', portal_role: 'admin' }
+      token: 'demo-token-organizer',
+      body: {
+        name: 'Dimas Gate',
+        email: inviteEmail,
+        role: 'Staff',
+        department: 'Gate & Check-in',
+        permissions: ['View Event', 'Manage Check-in']
+      }
     })
-    assert.equal(forbiddenPortal.status, 403)
+    assert.equal(inviteRes.status, 201)
+    assert.equal(inviteRes.data.data.member.status, 'Pending')
+    assert.ok(inviteRes.data.data.invite_url.includes('/accept-invite?token='))
+    assert.equal(typeof inviteRes.data.data.email_status.sent, 'boolean')
+
+    const inviteToken = new URL(inviteRes.data.data.invite_url).searchParams.get('token')
+    assert.ok(inviteToken)
+
+    const previewRes = await request(`/auth/invite/${inviteToken}`)
+    assert.equal(previewRes.status, 200)
+    assert.equal(previewRes.data.data.email, inviteEmail)
+    assert.deepEqual(previewRes.data.data.permissions, ['View Event', 'Manage Check-in'])
+
+    const acceptRes = await request('/auth/accept-invite', {
+      method: 'POST',
+      body: {
+        token: inviteToken,
+        full_name: 'Dimas Gate Accepted',
+        password: 'password123'
+      }
+    })
+    assert.equal(acceptRes.status, 200)
+    const invitedToken = acceptRes.data.data.access_token
+    assert.ok(invitedToken)
+
+    try {
+      // Invited panitia sees evt-1 and their assigned permissions
+      const eventsRes = await request('/events', { token: invitedToken })
+      assert.equal(eventsRes.status, 200)
+      const evt1 = eventsRes.data.data.find((e) => e.id === 'evt-1')
+      assert.ok(evt1)
+      assert.deepEqual(evt1.my_permissions, ['View Event', 'Manage Check-in'])
+
+      // Allowed on Check-in
+      const checkinListRes = await request('/events/evt-1/check-ins', { token: invitedToken })
+      assert.equal(checkinListRes.status, 200)
+
+      // Blocked on Finance because Organizer only granted View Event & Manage Check-in
+      const financeBlockedRes = await request('/events/evt-1/finance/summary', { token: invitedToken })
+      assert.equal(financeBlockedRes.status, 403)
+      assert.equal(financeBlockedRes.data.error.code, 'FORBIDDEN_PERMISSION')
+    } finally {
+      if (acceptRes.data.data.mode === 'supabase' && acceptRes.data.data.user?.id) {
+        const { supabaseAdmin } = await import('../src/config/supabase.js')
+        await supabaseAdmin?.auth?.admin?.deleteUser(acceptRes.data.data.user.id)
+      }
+    }
+  })
+
+  it('supports Passport Google OAuth stateless JWT tokens and oauth status endpoint', async () => {
+    const statusRes = await request('/auth/oauth/status')
+    assert.equal(statusRes.status, 200)
+    assert.equal(typeof statusRes.data.data.google_enabled, 'boolean')
+
+    const googleUser = {
+      id: 'usr-google-12345',
+      email: 'googlebuyer@example.com',
+      full_name: 'Google Buyer',
+      role: 'customer'
+    }
+    const token = signOAuthToken(googleUser)
+    assert.ok(token.startsWith('oauth-jwt.'))
+
+    const meRes = await request('/auth/me', { token })
+    assert.equal(meRes.status, 200)
+    assert.equal(meRes.data.data.user.email, 'googlebuyer@example.com')
+    assert.equal(meRes.data.data.user.role, 'customer')
+  })
+
+  it('validates and handles multipart media uploads for Supabase Storage bucket', async () => {
+    const statusRes = await request('/media/status')
+    assert.equal(statusRes.status, 200)
+    assert.equal(statusRes.data.data.media_bucket, 'terra-media')
+    assert.equal(statusRes.data.data.documents_bucket, 'terra-documents')
+
+    // Valid PNG upload
+    const form = new FormData()
+    form.append('folder', 'posters')
+    form.append('file', new Blob([Buffer.from('89504e470d0a1a0a', 'hex')], { type: 'image/png' }), 'poster.png')
+
+    const uploadRes = await fetch(`${baseUrl}/media/upload`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer demo-token-organizer' },
+      body: form
+    })
+    const uploadJson = await uploadRes.json()
+    assert.equal(uploadRes.status, 201)
+    assert.equal(uploadJson.data.bucket, 'terra-media')
+    assert.ok(uploadJson.data.public_url.includes('posters/usr-organizer/'))
+
+    // Reject disallowed MIME type (application/x-msdownload) on media bucket
+    const badForm = new FormData()
+    badForm.append('file', new Blob([Buffer.from('MZ')], { type: 'application/x-msdownload' }), 'malware.exe')
+    const badRes = await fetch(`${baseUrl}/media/upload`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer demo-token-organizer' },
+      body: badForm
+    })
+    assert.equal(badRes.status, 415)
+  })
+
+  it('supports Event Companion Forum posts, replies, status updates, and author deletion', async () => {
+    const initialList = await request('/marketplace/events/evt-1/companions')
+    assert.equal(initialList.status, 200)
+    assert.ok(initialList.data.data.length >= 1)
+
+    const createRes = await request('/marketplace/events/evt-1/companions', {
+      method: 'POST',
+      token: 'demo-token-customer',
+      body: {
+        title: 'Carpool bareng dari Bandung ke JCC',
+        departure_city: 'Bandung',
+        departure_point: 'Stasiun Bandung Pintu Utara',
+        departure_time: '05:30 WIB',
+        transport_mode: 'Kereta / Travel',
+        slots_available: 3,
+        contact_note: 'DM di sini atau TG @nadia',
+        notes: 'Naik Whoosh bareng biar cepat sampai Halim lalu lanjut ke Senayan.'
+      }
+    })
+    assert.equal(createRes.status, 201)
+    const postId = createRes.data.data.id
+    assert.equal(createRes.data.data.author.has_ticket, true)
+
+    const replyRes = await request(`/marketplace/companions/${postId}/replies`, {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { message: 'Ikut dong, aku juga berangkat dari Bandung pagi!' }
+    })
+    assert.equal(replyRes.status, 201)
+    assert.equal(replyRes.data.data.replies.length, 1)
+
+    const patchRes = await request(`/marketplace/companions/${postId}`, {
+      method: 'PATCH',
+      token: 'demo-token-customer',
+      body: { status: 'full', slots_available: 0 }
+    })
+    assert.equal(patchRes.status, 200)
+    assert.equal(patchRes.data.data.status, 'full')
+
+    const delRes = await request(`/marketplace/companions/${postId}`, {
+      method: 'DELETE',
+      token: 'demo-token-customer'
+    })
+    assert.equal(delRes.status, 200)
+  })
+
+  it('enforces per-event TERRA pricing, 14-day Pro trial anti-abuse, module/quota gates, bundles, downgrade & admin verification', async () => {
+    const catalogRes = await request('/pricing/catalog')
+    assert.equal(catalogRes.status, 200)
+    assert.equal(catalogRes.data.data.admin_whatsapp, '6287897192601')
+    assert.equal(catalogRes.data.data.plans.length, 4)
+
+    // Create a brand new event -> starts on FREE (Rp 0)
+    const evtRes = await request('/events', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: {
+        organization_id: 'org-1',
+        title: 'Campus Hackathon 2026',
+        start_at: '2026-12-25T09:00:00+07:00',
+        end_at: '2026-12-25T17:00:00+07:00',
+        capacity: 150
+      }
+    })
+    assert.equal(evtRes.status, 201)
+    const freeEventId = evtRes.data.data.id
+    assert.equal(evtRes.data.data.entitlement.plan_code, 'free')
+
+    // Enabling Finance on FREE event must fail with PLAN_UPGRADE_REQUIRED
+    const blockedEnable = await request(`/events/${freeEventId}/modules/finance`, {
+      method: 'PATCH',
+      token: 'demo-token-organizer',
+      body: { is_enabled: true }
+    })
+    assert.equal(blockedEnable.status, 403)
+    assert.equal(blockedEnable.data.error.code, 'PLAN_UPGRADE_REQUIRED')
+
+    // Activate 14 Days Pro Access trial on event -> unlocks Pro modules; second trial attempt fails anti-abuse
+    const trialRes = await request(`/events/${freeEventId}/subscription/trial`, {
+      method: 'POST',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(trialRes.status, 201)
+    assert.equal(trialRes.data.data.trial.is_trial, true)
+    assert.equal(trialRes.data.data.plan_code, 'pro')
+
+    const secondTrial = await request(`/events/${freeEventId}/subscription/trial`, {
+      method: 'POST',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(secondTrial.status, 409)
+
+    // Downgrade from Trial Pro back to Free preserves data
+    const downRes = await request(`/events/${freeEventId}/subscription/downgrade`, {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { plan_code: 'free' }
+    })
+    assert.equal(downRes.status, 200)
+    assert.equal(downRes.data.data.plan_code, 'free')
+
+    // Preview & Checkout PRO event plan with promo EARLY100 -> status starts as Pending (does NOT auto-activate)
+    const checkoutRes = await request('/billing/checkout', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: {
+        organization_id: 'org-1',
+        event_id: freeEventId,
+        plan_code: 'pro',
+        promo_code: 'EARLY100',
+        payment_method: 'manual_whatsapp'
+      }
+    })
+    assert.equal(checkoutRes.status, 201)
+    const txId = checkoutRes.data.data.transaction.id
+    assert.equal(checkoutRes.data.data.transaction.status, 'Pending')
+    assert.ok(checkoutRes.data.data.transaction.final_amount_idr < 129000)
+
+    // Still locked before Admin verifies payment
+    const stillLocked = await request(`/events/${freeEventId}/modules/finance`, {
+      method: 'PATCH',
+      token: 'demo-token-organizer',
+      body: { is_enabled: true }
+    })
+    assert.equal(stillLocked.status, 403)
+
+    // Admin verifies payment as Paid -> event upgrades to PRO and Finance unlocks!
+    const verifyRes = await request(`/admin/billing/transactions/${txId}/verify`, {
+      method: 'POST',
+      token: 'demo-token-admin',
+      body: { status: 'Paid', admin_notes: 'Transfer terverifikasi via WA' }
+    })
+    assert.equal(verifyRes.status, 200)
+    assert.equal(verifyRes.data.data.status, 'Paid')
+
+    const unlockRes = await request(`/events/${freeEventId}/modules/finance`, {
+      method: 'PATCH',
+      token: 'demo-token-organizer',
+      body: { is_enabled: true }
+    })
+    assert.equal(unlockRes.status, 200)
+
+    // Admin can still create new Organizer directly
+    const createOrgUserRes = await request('/admin/organizers', {
+      method: 'POST',
+      token: 'demo-token-admin',
+      body: {
+        full_name: 'Sinta EO',
+        organization_name: 'Sinta Event Lab',
+        email: 'sinta@eo.id',
+        phone: '087897192601',
+        password: 'password123',
+        plan: 'pro_monthly',
+        duration_days: 30
+      }
+    })
+    assert.equal(createOrgUserRes.status, 201)
+  })
+
+  it('supports complete organizer CRUD for Finance, Sponsors, Vendors, Participants, and Surveys', async () => {
+    const incCreate = await request('/events/evt-1/finance/incomes', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { category: 'Sponsorship', description: 'Sponsor Utama Awal', amount: 5000000 }
+    })
+    assert.equal(incCreate.status, 201)
+    const incId = incCreate.data.data.id
+
+    const incPatch = await request(`/finance/incomes/${incId}`, {
+      method: 'PATCH',
+      token: 'demo-token-organizer',
+      body: { description: 'Sponsor Utama Revisi', amount: 7500000 }
+    })
+    assert.equal(incPatch.status, 200)
+    assert.equal(incPatch.data.data.description, 'Sponsor Utama Revisi')
+    assert.equal(incPatch.data.data.amount, 7500000)
+
+    const incDel = await request(`/finance/incomes/${incId}`, {
+      method: 'DELETE',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(incDel.status, 200)
+
+    const expCreate = await request('/events/evt-1/finance/expenses', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { category: 'Operasional', description: 'Cetak Banner', amount: 450000 }
+    })
+    assert.equal(expCreate.status, 201)
+    const expId = expCreate.data.data.id
+
+    const expPatch = await request(`/finance/expenses/${expId}`, {
+      method: 'PATCH',
+      token: 'demo-token-organizer',
+      body: { amount: 600000 }
+    })
+    assert.equal(expPatch.status, 200)
+    assert.equal(expPatch.data.data.amount, 600000)
+
+    const expDel = await request(`/finance/expenses/${expId}`, {
+      method: 'DELETE',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(expDel.status, 200)
+
+    const spCreate = await request('/events/evt-1/sponsors', {
+      method: 'POST',
+      token: 'demo-token-organizer',
+      body: { name: 'Bank Kampus', tier: 'Gold', contribution: 'Rp 10.000.000', pic: 'Budi', status: 'Pending' }
+    })
+    assert.equal(spCreate.status, 201)
+    const spId = spCreate.data.data.id
+
+    const spPatch = await request(`/sponsors/${spId}`, {
+      method: 'PATCH',
+      token: 'demo-token-organizer',
+      body: { status: 'Confirmed', tier: 'Platinum' }
+    })
+    assert.equal(spPatch.status, 200)
+    assert.equal(spPatch.data.data.tier, 'Platinum')
+
+    const spDel = await request(`/sponsors/${spId}`, {
+      method: 'DELETE',
+      token: 'demo-token-organizer'
+    })
+    assert.equal(spDel.status, 200)
   })
 })

@@ -11,7 +11,8 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   role: z.enum(['customer', 'organizer']).default('customer'),
-  organization_name: z.string().optional().default('')
+  organization_name: z.string().optional().default(''),
+  plan: z.enum(['free_trial', 'pro_monthly']).optional().default('free_trial')
 })
 
 export const profileUpdateSchema = z.object({
@@ -28,7 +29,9 @@ export const organizationCreateSchema = z.object({
   description: z.string().optional(),
   email: z.string().email(),
   phone: z.string().optional(),
-  website: z.string().optional()
+  website: z.string().optional(),
+  logo_url: z.string().optional(),
+  cover_url: z.string().optional()
 })
 
 export const organizationMemberSchema = z.object({
@@ -153,16 +156,42 @@ export const ticketTypeSchema = z.object({
   status: z.enum(['Draft', 'Scheduled', 'On Sale', 'Sold Out', 'Sales Ended', 'Disabled']).default('On Sale')
 })
 
-export const orderCreateSchema = z.object({
-  event_id: z.string().min(1),
-  ticket_type_id: z.string().min(1),
-  quantity: z.coerce.number().int().min(1).max(10),
-  attendee: z.object({
-    full_name: z.string().min(2),
-    email: z.string().email(),
-    phone: z.string().min(6)
+export const orderCreateSchema = z
+  .object({
+    event_id: z.string().min(1),
+    ticket_type_id: z.string().min(1),
+    quantity: z.coerce.number().int().min(1).max(10),
+    attendee: z
+      .object({
+        full_name: z.string().min(2),
+        email: z.string().email(),
+        phone: z.string().min(6)
+      })
+      .optional(),
+    full_name: z.string().min(2).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().min(6).optional()
   })
-})
+  .superRefine((val, ctx) => {
+    const hasNested = Boolean(val.attendee?.full_name && val.attendee?.email && val.attendee?.phone)
+    const hasFlat = Boolean(val.full_name && val.email && val.phone)
+    if (!hasNested && !hasFlat) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Data peserta (nama lengkap, email, nomor telepon) wajib dilengkapi.'
+      })
+    }
+  })
+  .transform((val) => ({
+    event_id: val.event_id,
+    ticket_type_id: val.ticket_type_id,
+    quantity: val.quantity,
+    attendee: val.attendee || {
+      full_name: val.full_name,
+      email: val.email,
+      phone: val.phone
+    }
+  }))
 
 export const checkinSchema = z.object({
   code: z.string().min(3),
@@ -213,4 +242,130 @@ export const categorySchema = z.object({
 export const reportCreateSchema = z.object({
   reason: z.string().min(3),
   description: z.string().min(5)
+})
+
+export const acceptInviteSchema = z.object({
+  token: z.string().min(8),
+  full_name: z.string().min(2).optional(),
+  password: z.string().min(6)
+})
+
+export const oauthSessionSchema = z.object({
+  access_token: z.string().min(10)
+})
+
+export const verifyOtpSchema = z.object({
+  email: z.string().email('Format email tidak valid'),
+  otp_code: z.string().trim().regex(/^\d{6}$/, 'Kode OTP harus terdiri dari 6 digit angka'),
+  otp_session_token: z.string().optional()
+})
+
+export const resendOtpSchema = z.object({
+  email: z.string().email('Format email tidak valid'),
+  otp_session_token: z.string().optional()
+})
+
+export const changeUnverifiedEmailSchema = z.object({
+  current_email: z.string().email('Format email lama tidak valid'),
+  new_email: z.string().email('Format email baru tidak valid'),
+  otp_session_token: z.string().min(10, 'Sesi verifikasi tidak valid')
+})
+
+export const companionPostCreateSchema = z.object({
+  title: z.string().trim().min(3, 'Judul ajakan minimal 3 karakter').max(120),
+  departure_city: z.string().trim().min(2, 'Kota/area asal wajib diisi').max(60),
+  departure_point: z.string().trim().min(2, 'Titik kumpul wajib diisi').max(120),
+  departure_time: z.string().trim().max(40).optional().default(''),
+  transport_mode: z.string().trim().min(2).max(50).default('KRL / MRT / TransJakarta'),
+  slots_available: z.coerce.number().int().min(1).max(20).default(3),
+  contact_note: z.string().trim().max(120).optional().default(''),
+  notes: z.string().trim().min(5, 'Catatan ajakan minimal 5 karakter').max(600)
+})
+
+export const companionPostUpdateSchema = z.object({
+  status: z.enum(['open', 'full', 'closed']).optional(),
+  slots_available: z.coerce.number().int().min(0).max(20).optional(),
+  notes: z.string().trim().min(5).max(600).optional(),
+  contact_note: z.string().trim().max(120).optional()
+})
+
+export const companionReplyCreateSchema = z.object({
+  message: z.string().trim().min(2, 'Balasan minimal 2 karakter').max(400)
+})
+
+export const adminCreateOrganizerSchema = z.object({
+  full_name: z.string().trim().min(2, 'Nama pelanggan / PIC minimal 2 karakter'),
+  organization_name: z.string().trim().min(2, 'Nama organisasi minimal 2 karakter'),
+  email: z.string().trim().email('Format email tidak valid'),
+  phone: z.string().trim().min(6, 'Kontak / No. HP minimal 6 karakter').optional().default(''),
+  password: z.string().min(6, 'Password minimal 6 karakter'),
+  plan: z.enum(['pro_monthly', 'free_trial']).default('pro_monthly'),
+  duration_days: z.coerce.number().int().min(1).max(3650).default(30)
+})
+
+export const adminUpdateSubscriptionSchema = z.object({
+  plan: z.enum(['free_trial', 'pro_monthly', 'unpaid']).optional(),
+  status: z.enum(['trialing', 'active', 'expired', 'unpaid']),
+  duration_days: z.coerce.number().int().min(0).max(3650).optional()
+})
+
+export const billingPreviewSchema = z.object({
+  plan_code: z.enum(['free', 'starter', 'pro', 'ultimate']).optional().default('starter'),
+  bundle_id: z.string().nullable().optional(),
+  event_id: z.string().nullable().optional(),
+  promo_code: z.string().max(40).optional().default(''),
+  use_early_access: z.boolean().optional().default(false),
+  is_community: z.boolean().optional().default(false)
+})
+
+export const billingCheckoutSchema = billingPreviewSchema.extend({
+  organization_id: z.string().min(1, 'Organisasi wajib dipilih'),
+  payment_method: z.enum(['manual_whatsapp', 'manual_transfer', 'payment_gateway', 'free']).default('manual_whatsapp'),
+  community_org_proof: z.string().max(240).optional().default(''),
+  payment_notes: z.string().max(300).optional().default('')
+})
+
+export const billingVerifySchema = z.object({
+  status: z.enum(['Paid', 'Rejected', 'Expired', 'Refunded']),
+  admin_notes: z.string().max(300).optional().default('')
+})
+
+export const adminPlanUpdateSchema = z.object({
+  name: z.string().min(2).optional(),
+  tagline: z.string().optional(),
+  description: z.string().optional(),
+  price_idr: z.coerce.number().int().min(0).optional(),
+  max_active_events: z.coerce.number().int().min(1).optional(),
+  max_participants: z.coerce.number().int().min(1).optional(),
+  max_team_members: z.coerce.number().int().min(1).optional(),
+  max_storage_mb: z.coerce.number().int().min(1).optional(),
+  allowed_modules: z.array(z.string()).optional(),
+  features: z.array(z.string()).optional(),
+  trial_days: z.coerce.number().int().min(0).max(90).optional(),
+  early_access_price_idr: z.coerce.number().int().min(0).nullable().optional(),
+  community_discount_pct: z.coerce.number().int().min(0).max(90).optional(),
+  is_active: z.boolean().optional(),
+  allow_downgrade: z.boolean().optional()
+})
+
+export const bundleUpsertSchema = z.object({
+  code: z.string().trim().min(3),
+  name: z.string().trim().min(3),
+  plan_code: z.enum(['free', 'starter', 'pro', 'ultimate']).default('pro'),
+  event_quota: z.coerce.number().int().min(2).max(100),
+  bundle_price_idr: z.coerce.number().int().min(0),
+  description: z.string().optional().default(''),
+  is_active: z.boolean().optional().default(true)
+})
+
+export const promoUpsertSchema = z.object({
+  code: z.string().trim().min(3).max(32),
+  name: z.string().trim().min(3),
+  promo_type: z.enum(['early_access', 'community', 'promo']).default('promo'),
+  discount_type: z.enum(['percent', 'fixed']).default('percent'),
+  discount_value: z.coerce.number().int().min(1),
+  applies_to_plan: z.string().nullable().optional(),
+  requires_verification: z.boolean().optional().default(false),
+  max_redemptions: z.coerce.number().int().min(1).nullable().optional(),
+  is_active: z.boolean().optional().default(true)
 })

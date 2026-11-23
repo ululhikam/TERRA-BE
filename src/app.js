@@ -3,6 +3,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { env } from './config/env.js'
+import passport from './config/passport.js'
 import apiV1Router from './routes/index.js'
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js'
 
@@ -53,6 +54,7 @@ app.use(
 
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
+app.use(passport.initialize())
 
 // Root health check
 app.get('/', (_req, res) => {

@@ -2,132 +2,169 @@ import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
 import { requireAdmin } from '../middleware/role.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
-import { moderationNoteSchema, categorySchema } from '../validators/schemas.js'
-import { store, slugify } from '../repositories/store.js'
-import { sendSuccess, AppError } from '../utils/response.js'
+import {
+  moderationNoteSchema,
+  categorySchema,
+  adminCreateOrganizerSchema,
+  adminUpdateSubscriptionSchema,
+  adminPlanUpdateSchema,
+  bundleUpsertSchema,
+  promoUpsertSchema,
+  billingVerifySchema
+} from '../validators/schemas.js'
+import { isSupabaseEnabled, supabaseAdmin } from '../config/supabase.js'
+import { hashPassword } from '../utils/crypto.js'
+import * as db from '../repositories/db.js'
+import * as pricingDb from '../repositories/pricing.db.js'
+import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
 
 router.use('/admin', requireAuth, requireAdmin)
 
-router.get('/admin/dashboard', (_req, res) => {
-  return sendSuccess(res, {
-    total_users: store.users.length,
-    total_organizations: store.organizations.length,
-    total_events: store.events.filter((e) => !e.deleted_at).length,
-    published_events: store.events.filter((e) => e.publication_status === 'Published').length,
-    pending_events: store.events.filter((e) => e.publication_status === 'Pending Review').length,
-    total_orders: store.orders.length,
-    total_issued_tickets: store.tickets.length,
-    total_checkins: store.checkinLogs.length
-  })
-})
+router.get('/admin/dashboard', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.getAdminDashboard())
+}))
 
-router.get('/admin/users', (_req, res) => {
-  return sendSuccess(res, store.users)
-})
+router.get('/admin/users', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listAdminUsers())
+}))
 
-router.patch('/admin/users/:id/status', (req, res) => {
-  const user = store.users.find((u) => u.id === req.params.id)
-  if (!user) throw new AppError('User tidak ditemukan.', 404, 'USER_NOT_FOUND')
-  user.is_suspended = Boolean(req.body?.is_suspended)
+router.patch('/admin/users/:id/status', asyncHandler(async (req, res) => {
+  const user = await db.updateAdminUserStatus(req.params.id, req.body?.is_suspended)
   return sendSuccess(res, user, 'Status user diperbarui.')
-})
+}))
 
-router.get('/admin/organizations', (_req, res) => {
-  return sendSuccess(res, store.organizations)
-})
+router.post('/admin/organizers', validateBody(adminCreateOrganizerSchema), asyncHandler(async (req, res) => {
+  const { full_name, organization_name, email, phone, password, plan, duration_days } = req.validatedBody
 
-router.get('/admin/verifications', (_req, res) => {
-  return sendSuccess(res, store.verifications)
-})
-
-router.post('/admin/verifications/:id/review', (req, res) => {
-  const ver = store.verifications.find((v) => v.id === req.params.id)
-  if (!ver) throw new AppError('Data verifikasi tidak ditemukan.', 404, 'VERIFICATION_NOT_FOUND')
-  const status = req.body?.status === 'verified' ? 'verified' : 'rejected'
-  ver.verification_status = status
-  ver.review_notes = req.body?.notes || ''
-  ver.reviewed_by = req.user.id
-  ver.reviewed_at = new Date().toISOString()
-
-  const org = store.organizations.find((o) => o.id === ver.organization_id)
-  if (org) org.verification_status = status
-
-  return sendSuccess(res, ver, `Organisasi berhasil di-${status}.`)
-})
-
-router.get('/admin/events', (_req, res) => {
-  return sendSuccess(res, store.events.filter((e) => !e.deleted_at))
-})
-
-function handleModeration(req, res, action) {
-  const evt = store.getEvent(req.params.id)
-  const map = {
-    approve: { pub: 'Published', op: 'Published' },
-    reject: { pub: 'Rejected', op: evt.status },
-    suspend: { pub: 'Suspended', op: evt.status }
+  let authUserId = `orgu-${Date.now()}`
+  if (isSupabaseEnabled && supabaseAdmin) {
+    const { data: createdData, error: createError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name, role: 'organizer', organization_name }
+    })
+    if (createError && !(createError.message || '').toLowerCase().includes('already')) {
+      throw new AppError(createError.message || 'Gagal membuat akun auth organizer di Supabase.', 400, 'AUTH_CREATE_FAILED')
+    }
+    if (createdData?.user?.id) {
+      authUserId = createdData.user.id
+    }
   }
-  evt.publication_status = map[action].pub
-  evt.status = map[action].op
 
-  const log = {
-    id: 'mod-' + Date.now(),
-    event_id: evt.id,
-    admin_id: req.user.id,
-    action,
-    notes: req.validatedBody?.notes || '',
-    created_at: new Date().toISOString()
-  }
-  store.moderationLogs.unshift(log)
-  return sendSuccess(res, { event: evt, log }, `Event berhasil di-${action}.`)
-}
+  const result = await db.createAdminOrganizer({
+    id: authUserId,
+    full_name,
+    organization_name,
+    email,
+    phone,
+    password_hash: hashPassword(password),
+    plan,
+    duration_days
+  })
 
-router.post('/admin/events/:id/approve', validateBody(moderationNoteSchema), (req, res) => handleModeration(req, res, 'approve'))
-router.post('/admin/events/:id/reject', validateBody(moderationNoteSchema), (req, res) => handleModeration(req, res, 'reject'))
-router.post('/admin/events/:id/suspend', validateBody(moderationNoteSchema), (req, res) => handleModeration(req, res, 'suspend'))
+  return sendSuccess(
+    res,
+    result,
+    `Akun Organizer "${full_name}" berhasil ditambahkan dan aktif selama ${duration_days} hari.`,
+    201
+  )
+}))
 
-router.get('/admin/moderation', (_req, res) => {
-  return sendSuccess(res, store.moderationLogs)
-})
+router.patch('/admin/organizers/:id/subscription', validateBody(adminUpdateSubscriptionSchema), asyncHandler(async (req, res) => {
+  const updated = await db.updateOrganizerSubscription(req.params.id, req.validatedBody)
+  return sendSuccess(res, updated, 'Status langganan Organizer berhasil diperbarui.')
+}))
 
-router.get('/admin/categories', (_req, res) => {
-  return sendSuccess(res, store.categories)
-})
+router.get('/admin/organizations', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listAllOrganizations())
+}))
 
-router.post('/admin/categories', validateBody(categorySchema), (req, res) => {
-  const cat = {
-    id: 'cat-' + Date.now(),
-    slug: slugify(req.validatedBody.name),
-    is_active: true,
-    ...req.validatedBody
-  }
-  store.categories.push(cat)
+router.get('/admin/verifications', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listVerifications())
+}))
+
+router.post('/admin/verifications/:id/review', asyncHandler(async (req, res) => {
+  const result = await db.reviewVerification(req.params.id, req.body?.status, req.body?.notes, req.user.id)
+  const label = result.verification?.verification_status || 'reviewed'
+  return sendSuccess(res, result, `Organisasi berhasil di-${label}.`)
+}))
+
+router.get('/admin/events', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listAdminEvents())
+}))
+
+router.post('/admin/events/:id/approve', validateBody(moderationNoteSchema), asyncHandler(async (req, res) => {
+  const result = await db.moderateEvent(req.params.id, 'approve', req.user.id, req.validatedBody?.notes)
+  return sendSuccess(res, result, 'Event berhasil di-approve.')
+}))
+
+router.post('/admin/events/:id/reject', validateBody(moderationNoteSchema), asyncHandler(async (req, res) => {
+  const result = await db.moderateEvent(req.params.id, 'reject', req.user.id, req.validatedBody?.notes)
+  return sendSuccess(res, result, 'Event berhasil di-reject.')
+}))
+
+router.post('/admin/events/:id/suspend', validateBody(moderationNoteSchema), asyncHandler(async (req, res) => {
+  const result = await db.moderateEvent(req.params.id, 'suspend', req.user.id, req.validatedBody?.notes)
+  return sendSuccess(res, result, 'Event berhasil di-suspend.')
+}))
+
+router.get('/admin/moderation', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listModerationLogs())
+}))
+
+router.get('/admin/categories', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listAllCategories())
+}))
+
+router.post('/admin/categories', validateBody(categorySchema), asyncHandler(async (req, res) => {
+  const cat = await db.createCategory(req.validatedBody)
   return sendSuccess(res, cat, 'Kategori dibuat.', 201)
-})
+}))
 
-router.patch('/admin/categories/:id', (req, res) => {
-  const cat = store.categories.find((c) => c.id === req.params.id)
-  if (!cat) throw new AppError('Kategori tidak ditemukan.', 404, 'CATEGORY_NOT_FOUND')
-  Object.assign(cat, req.body)
+router.patch('/admin/categories/:id', asyncHandler(async (req, res) => {
+  const cat = await db.updateCategory(req.params.id, req.body)
   return sendSuccess(res, cat, 'Kategori diperbarui.')
-})
+}))
 
-router.delete('/admin/categories/:id', (req, res) => {
-  store.categories = store.categories.filter((c) => c.id !== req.params.id)
-  return sendSuccess(res, { id: req.params.id }, 'Kategori dihapus.')
-})
+router.delete('/admin/categories/:id', asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.deleteCategory(req.params.id), 'Kategori dihapus.')
+}))
 
-router.get('/admin/reports', (_req, res) => {
-  return sendSuccess(res, store.reports)
-})
+router.get('/admin/reports', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listReports())
+}))
 
-router.patch('/admin/reports/:id', (req, res) => {
-  const rep = store.reports.find((r) => r.id === req.params.id)
-  if (!rep) throw new AppError('Laporan tidak ditemukan.', 404, 'REPORT_NOT_FOUND')
-  rep.status = req.body?.status || 'resolved'
-  rep.reviewed_by = req.user.id
+router.patch('/admin/reports/:id', asyncHandler(async (req, res) => {
+  const rep = await db.updateReportStatus(req.params.id, req.body?.status || 'resolved', req.user.id)
   return sendSuccess(res, rep, 'Laporan diperbarui.')
-})
+}))
+
+// ---------------- PLATFORM ADMIN PRICING & BILLING ----------------
+router.get('/admin/pricing/overview', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await pricingDb.getAdminPricingOverview())
+}))
+
+router.patch('/admin/pricing/plans/:code', validateBody(adminPlanUpdateSchema), asyncHandler(async (req, res) => {
+  const plan = await pricingDb.adminUpdatePricingPlan(req.params.code, req.validatedBody, req.user)
+  return sendSuccess(res, plan, `Paket ${plan.name} berhasil diperbarui tanpa mengubah transaksi sebelumnya.`)
+}))
+
+router.post('/admin/pricing/bundles', validateBody(bundleUpsertSchema), asyncHandler(async (req, res) => {
+  const bundle = await pricingDb.adminUpsertBundle(req.validatedBody)
+  return sendSuccess(res, bundle, `Bundle ${bundle.name} disimpan.`, 201)
+}))
+
+router.post('/admin/pricing/promos', validateBody(promoUpsertSchema), asyncHandler(async (req, res) => {
+  const promo = await pricingDb.adminCreatePromo(req.validatedBody)
+  return sendSuccess(res, promo, `Kode promo ${promo.code} disimpan.`, 201)
+}))
+
+router.post('/admin/billing/transactions/:txId/verify', validateBody(billingVerifySchema), asyncHandler(async (req, res) => {
+  const tx = await pricingDb.adminVerifyBillingTransaction(req.params.txId, req.user, req.validatedBody)
+  return sendSuccess(res, tx, `Transaksi ${tx.invoice_number} diperbarui ke status ${tx.status}.`)
+}))
 
 export default router

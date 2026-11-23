@@ -1,183 +1,181 @@
 import { Router } from 'express'
+import { env } from '../config/env.js'
 import { requireAuth } from '../middleware/auth.middleware.js'
-import { requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
+import { requireEventPermission, requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
 import { requireEventModule } from '../middleware/module.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
 import { financeRecordSchema, vendorSchema, sponsorSchema } from '../validators/schemas.js'
-import { store } from '../repositories/store.js'
-import { sendSuccess, AppError } from '../utils/response.js'
+import {
+  createSignedDocumentUrl,
+  deleteStorageObject,
+  uploadBufferToStorage,
+  uploadSingleFile
+} from '../services/storage.service.js'
+import * as db from '../repositories/db.js'
+import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
 
 // ---------------- FINANCE (With Automated Paid Ticket Revenue) ----------------
-router.get('/events/:id/finance/summary', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), (req, res) => {
-  return sendSuccess(res, store.getFinanceSummary(req.params.id))
-})
+router.get('/events/:id/finance/summary', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.getFinanceSummary(req.params.id))
+}))
 
-router.get('/events/:id/finance/budgets', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), (req, res) => {
-  return sendSuccess(res, { event_id: req.params.id, amount: store.budgets[req.params.id] || 0, currency: 'IDR' })
-})
+router.get('/events/:id/finance/budgets', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.getBudget(req.params.id))
+}))
 
-router.post('/events/:id/finance/budgets', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), (req, res) => {
+router.post('/events/:id/finance/budgets', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), asyncHandler(async (req, res) => {
   const amount = Number(req.body?.amount || 0)
   if (amount < 0) throw new AppError('Budget tidak boleh negatif.', 422, 'INVALID_BUDGET')
-  store.budgets[req.params.id] = amount
-  return sendSuccess(res, { event_id: req.params.id, amount }, 'Anggaran event diperbarui.', 201)
-})
+  const budget = await db.setBudget(req.params.id, amount)
+  return sendSuccess(res, budget, 'Anggaran event diperbarui.', 201)
+}))
 
-router.get('/events/:id/finance/incomes', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), (req, res) => {
-  return sendSuccess(res, store.incomes.filter((i) => i.event_id === req.params.id))
-})
+router.get('/events/:id/finance/incomes', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listIncomes(req.params.id))
+}))
 
-router.post('/events/:id/finance/incomes', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), validateBody(financeRecordSchema), (req, res) => {
-  const item = {
-    id: 'inc-' + Date.now(),
-    event_id: req.params.id,
-    ...req.validatedBody,
-    date: req.validatedBody.date || new Date().toISOString().slice(0, 10)
-  }
-  store.incomes.unshift(item)
+router.post('/events/:id/finance/incomes', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), validateBody(financeRecordSchema), asyncHandler(async (req, res) => {
+  const item = await db.createIncome(req.params.id, req.validatedBody, req.user.id)
   return sendSuccess(res, item, 'Pemasukan dicatat.', 201)
-})
+}))
 
-router.get('/events/:id/finance/expenses', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), (req, res) => {
-  return sendSuccess(res, store.expenses.filter((e) => e.event_id === req.params.id))
-})
+router.patch('/finance/incomes/:id', requireAuth, requireOrganizerOrAdmin, validateBody(financeRecordSchema.partial()), asyncHandler(async (req, res) => {
+  const item = await db.updateIncome(req.params.id, req.validatedBody)
+  return sendSuccess(res, item, 'Pemasukan diperbarui.')
+}))
 
-router.post('/events/:id/finance/expenses', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), validateBody(financeRecordSchema), (req, res) => {
-  const item = {
-    id: 'exp-' + Date.now(),
-    event_id: req.params.id,
-    ...req.validatedBody,
-    date: req.validatedBody.date || new Date().toISOString().slice(0, 10)
-  }
-  store.expenses.unshift(item)
+router.delete('/finance/incomes/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const result = await db.deleteIncome(req.params.id)
+  return sendSuccess(res, result, 'Pemasukan dihapus.')
+}))
+
+router.get('/events/:id/finance/expenses', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listExpenses(req.params.id))
+}))
+
+router.post('/events/:id/finance/expenses', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), validateBody(financeRecordSchema), asyncHandler(async (req, res) => {
+  const item = await db.createExpense(req.params.id, req.validatedBody, req.user.id)
   return sendSuccess(res, item, 'Pengeluaran dicatat.', 201)
-})
+}))
+
+router.patch('/finance/expenses/:id', requireAuth, requireOrganizerOrAdmin, validateBody(financeRecordSchema.partial()), asyncHandler(async (req, res) => {
+  const item = await db.updateExpense(req.params.id, req.validatedBody)
+  return sendSuccess(res, item, 'Pengeluaran diperbarui.')
+}))
+
+router.delete('/finance/expenses/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const result = await db.deleteExpense(req.params.id)
+  return sendSuccess(res, result, 'Pengeluaran dihapus.')
+}))
 
 // ---------------- VENDORS ----------------
-router.get('/events/:id/vendors', requireAuth, requireOrganizerOrAdmin, requireEventModule('vendors'), (req, res) => {
-  return sendSuccess(res, store.vendors.filter((v) => v.event_id === req.params.id))
-})
+router.get('/events/:id/vendors', requireAuth, requireOrganizerOrAdmin, requireEventModule('vendors'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listVendors(req.params.id))
+}))
 
-router.post('/events/:id/vendors', requireAuth, requireOrganizerOrAdmin, requireEventModule('vendors'), validateBody(vendorSchema), (req, res) => {
-  const v = { id: 'v-' + Date.now(), event_id: req.params.id, ...req.validatedBody }
-  store.vendors.unshift(v)
+router.post('/events/:id/vendors', requireAuth, requireOrganizerOrAdmin, requireEventModule('vendors'), validateBody(vendorSchema), asyncHandler(async (req, res) => {
+  const v = await db.createVendor(req.params.id, req.validatedBody)
   return sendSuccess(res, v, 'Vendor ditambahkan.', 201)
-})
+}))
 
-router.patch('/vendors/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const v = store.vendors.find((item) => item.id === req.params.id)
-  if (!v) throw new AppError('Vendor tidak ditemukan.', 404, 'VENDOR_NOT_FOUND')
-  Object.assign(v, req.body)
+router.patch('/vendors/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const v = await db.updateVendor(req.params.id, req.body)
   return sendSuccess(res, v, 'Vendor diperbarui.')
-})
+}))
 
-router.delete('/vendors/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  store.vendors = store.vendors.filter((v) => v.id !== req.params.id)
-  return sendSuccess(res, { id: req.params.id }, 'Vendor dihapus.')
-})
+router.delete('/vendors/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.deleteVendor(req.params.id), 'Vendor dihapus.')
+}))
 
 // ---------------- SPONSORS ----------------
-router.get('/events/:id/sponsors', requireAuth, requireOrganizerOrAdmin, requireEventModule('sponsors'), (req, res) => {
-  return sendSuccess(res, store.sponsors.filter((s) => s.event_id === req.params.id))
-})
+router.get('/events/:id/sponsors', requireAuth, requireOrganizerOrAdmin, requireEventModule('sponsors'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listSponsors(req.params.id))
+}))
 
-router.post('/events/:id/sponsors', requireAuth, requireOrganizerOrAdmin, requireEventModule('sponsors'), validateBody(sponsorSchema), (req, res) => {
-  const s = { id: 's-' + Date.now(), event_id: req.params.id, ...req.validatedBody }
-  store.sponsors.unshift(s)
+router.post('/events/:id/sponsors', requireAuth, requireOrganizerOrAdmin, requireEventModule('sponsors'), validateBody(sponsorSchema), asyncHandler(async (req, res) => {
+  const s = await db.createSponsor(req.params.id, req.validatedBody)
   return sendSuccess(res, s, 'Sponsor ditambahkan.', 201)
-})
+}))
 
-router.patch('/sponsors/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const s = store.sponsors.find((item) => item.id === req.params.id)
-  if (!s) throw new AppError('Sponsor tidak ditemukan.', 404, 'SPONSOR_NOT_FOUND')
-  Object.assign(s, req.body)
+router.patch('/sponsors/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const s = await db.updateSponsor(req.params.id, req.body)
   return sendSuccess(res, s, 'Sponsor diperbarui.')
-})
+}))
 
-router.delete('/sponsors/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  store.sponsors = store.sponsors.filter((s) => s.id !== req.params.id)
-  return sendSuccess(res, { id: req.params.id }, 'Sponsor dihapus.')
-})
+router.delete('/sponsors/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.deleteSponsor(req.params.id), 'Sponsor dihapus.')
+}))
 
 // ---------------- DOCUMENTS ----------------
-router.get('/events/:id/documents', requireAuth, requireOrganizerOrAdmin, requireEventModule('documents'), (req, res) => {
-  return sendSuccess(res, store.documents.filter((d) => d.event_id === req.params.id))
-})
+router.get('/events/:id/documents', requireAuth, requireOrganizerOrAdmin, requireEventModule('documents'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listDocuments(req.params.id))
+}))
 
-router.post('/events/:id/documents', requireAuth, requireOrganizerOrAdmin, requireEventModule('documents'), (req, res) => {
-  const doc = {
-    id: 'doc-' + Date.now(),
-    event_id: req.params.id,
-    file_name: req.body?.file_name || 'Document.pdf',
-    category: req.body?.category || 'Operasional',
-    visibility: req.body?.visibility || 'internal',
-    file_path: `events/${req.params.id}/${Date.now()}.pdf`,
-    created_at: new Date().toISOString()
+router.post(
+  '/events/:id/documents',
+  requireAuth,
+  requireOrganizerOrAdmin,
+  requireEventModule('documents'),
+  uploadSingleFile.single('file'),
+  asyncHandler(async (req, res) => {
+    let payload = { ...(req.body || {}) }
+
+    if (req.file) {
+      const uploaded = await uploadBufferToStorage({
+        buffer: req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        folder: `events/${req.params.id}/documents`,
+        bucketType: 'documents',
+        ownerId: req.user.id
+      })
+      payload.file_name = payload.file_name || req.file.originalname
+      payload.file_path = uploaded.path
+    }
+
+    const doc = await db.createDocument(req.params.id, payload, req.user.id)
+    return sendSuccess(res, doc, 'Dokumen diunggah ke Supabase Storage.', 201)
+  })
+)
+
+router.get('/documents/:id/download', requireAuth, asyncHandler(async (req, res) => {
+  const doc = await db.findDocument(req.params.id)
+  const signedUrl = await createSignedDocumentUrl(doc.file_path, {
+    bucket: env.supabaseDocsBucket,
+    expiresIn: 300,
+    downloadName: doc.file_name
+  })
+  return sendSuccess(res, { signed_url: signedUrl, file_name: doc.file_name })
+}))
+
+router.delete('/documents/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const doc = await db.findDocument(req.params.id).catch(() => null)
+  if (doc?.file_path) {
+    await deleteStorageObject(doc.file_path, env.supabaseDocsBucket)
   }
-  store.documents.unshift(doc)
-  return sendSuccess(res, doc, 'Dokumen diunggah.', 201)
-})
-
-router.get('/documents/:id/download', requireAuth, (req, res) => {
-  const doc = store.documents.find((d) => d.id === req.params.id)
-  if (!doc) throw new AppError('Dokumen tidak ditemukan.', 404, 'DOC_NOT_FOUND')
-  return sendSuccess(res, { signed_url: `https://storage.supabase.co/signed/${doc.file_path}?token=demo` })
-})
-
-router.delete('/documents/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  store.documents = store.documents.filter((d) => d.id !== req.params.id)
-  return sendSuccess(res, { id: req.params.id }, 'Dokumen dihapus.')
-})
+  return sendSuccess(res, await db.deleteDocument(req.params.id), 'Dokumen dihapus.')
+}))
 
 // ---------------- SURVEYS & FEEDBACK ----------------
-router.get('/events/:id/surveys', requireAuth, requireEventModule('feedback'), (req, res) => {
-  return sendSuccess(res, store.surveys.filter((s) => s.event_id === req.params.id))
-})
+router.get('/events/:id/surveys', requireAuth, requireEventModule('feedback'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listSurveys(req.params.id))
+}))
 
-router.post('/events/:id/surveys', requireAuth, requireOrganizerOrAdmin, requireEventModule('feedback'), (req, res) => {
-  const srv = {
-    id: 'srv-' + Date.now(),
-    event_id: req.params.id,
-    title: req.body?.title || 'Survey Event',
-    description: req.body?.description || '',
-    is_active: true,
-    responses: []
-  }
-  store.surveys.unshift(srv)
+router.post('/events/:id/surveys', requireAuth, requireOrganizerOrAdmin, requireEventModule('feedback'), asyncHandler(async (req, res) => {
+  const srv = await db.createSurvey(req.params.id, req.body)
   return sendSuccess(res, srv, 'Survey dibuat.', 201)
-})
+}))
 
-router.post('/surveys/:id/responses', requireAuth, (req, res) => {
-  const srv = store.surveys.find((s) => s.id === req.params.id)
-  if (!srv) throw new AppError('Survey tidak ditemukan.', 404, 'SURVEY_NOT_FOUND')
-  const resp = { id: 'res-' + Date.now(), user_id: req.user.id, answers: req.body?.answers || {}, submitted_at: new Date().toISOString() }
-  srv.responses.push(resp)
+router.post('/surveys/:id/responses', requireAuth, asyncHandler(async (req, res) => {
+  const resp = await db.submitSurveyResponse(req.params.id, req.user.id, req.body?.answers || {})
   return sendSuccess(res, resp, 'Terima kasih atas feedback Anda.', 201)
-})
+}))
 
 // ---------------- DEEP ANALYTICS & REPORTS ----------------
-router.get('/events/:id/reports', requireAuth, requireOrganizerOrAdmin, requireEventModule('reports'), (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  const tickets = store.ticketTypes.filter((t) => t.event_id === evt.id)
-  const totalQuota = tickets.reduce((s, t) => s + t.quantity, 0)
-  const totalSold = tickets.reduce((s, t) => s + t.sold_quantity, 0)
-  const evtParticipants = store.participants.filter((p) => p.event_id === evt.id)
-  const checkedIn = evtParticipants.filter((p) => p.checked_in).length
-  const finance = store.getFinanceSummary(evt.id)
-
-  return sendSuccess(res, {
-    event_id: evt.id,
-    title: evt.title,
-    sell_through_rate_pct: totalQuota ? Math.round((totalSold / totalQuota) * 100) : 0,
-    total_quota: totalQuota,
-    total_sold: totalSold,
-    registered_participants: evtParticipants.length,
-    checked_in_count: checkedIn,
-    attendance_rate_pct: evtParticipants.length ? Math.round((checkedIn / evtParticipants.length) * 100) : 0,
-    finance
-  })
-})
+router.get('/events/:id/reports', requireAuth, requireOrganizerOrAdmin, requireEventModule('reports'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.getEventReports(req.params.id))
+}))
 
 export default router

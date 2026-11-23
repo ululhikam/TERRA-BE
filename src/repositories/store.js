@@ -38,7 +38,10 @@ class BackendStore {
         phone: '081234567890',
         bio: 'Lead Event Architect at Nusantara Tech.',
         role: 'organizer',
-        is_suspended: false
+        is_suspended: false,
+        subscription_plan: 'pro_monthly',
+        subscription_status: 'active',
+        subscription_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
       },
       {
         id: 'usr-customer',
@@ -708,6 +711,7 @@ class BackendStore {
       { id: 'tm-2', event_id: 'evt-1', name: 'Rina Kusuma', email: 'rina@example.com', role: 'Manager', department: 'Program & Timeline', permissions: ['View Event', 'Manage Timeline', 'View Participants'] },
       { id: 'tm-3', event_id: 'evt-1', name: 'Budi Santoso', email: 'budi@example.com', role: 'Staff', department: 'Gate & Check-in Desk', permissions: ['View Event', 'Manage Check-in'] }
     ]
+    this.teamInvites = []
 
     this.budgets = { 'evt-1': 75000000, 'evt-2': 15000000 }
     this.incomes = [
@@ -738,9 +742,353 @@ class BackendStore {
     this.moderationLogs = []
     this.activityLogs = []
     this.reports = []
+    this.companionPosts = [
+      {
+        id: 'cmp-1',
+        event_id: 'evt-1',
+        author_id: 'usr-customer',
+        title: 'Barengan MRT / KRL ke Hall B JCC dari Jakarta Selatan',
+        departure_city: 'Jakarta Selatan',
+        departure_point: 'Stasiun MRT Blok M (Pintu Keluar B)',
+        departure_time: '07:45 WIB',
+        transport_mode: 'KRL / MRT / TransJakarta',
+        slots_available: 4,
+        contact_note: 'Balas di forum ini dulu biar koordinasi bareng',
+        notes: 'Berangkat pagi biar sempat registrasi & morning coffee bareng sebelum keynote. Santai & ramah untuk yang datang sendiri!',
+        status: 'open',
+        created_at: '2026-11-17T08:00:00Z',
+        updated_at: '2026-11-17T08:00:00Z'
+      }
+    ]
+    this.companionReplies = [
+      {
+        id: 'cmpr-1',
+        post_id: 'cmp-1',
+        author_id: 'usr-organizer',
+        message: 'Sampai jumpa di venue! Pintu registrasi Hall B dibuka mulai pukul 08:15 WIB ya.',
+        created_at: '2026-11-17T08:30:00Z'
+      }
+    ]
     this.notifications = [
       { id: 'ntf-1', user_id: 'usr-organizer', title: 'Event Disetujui', message: 'Indonesia Fullstack & AI Summit 2026 telah dipublikasikan di marketplace.', is_read: false, created_at: '2026-11-16T09:00:00Z' }
     ]
+
+    this.pricingPlans = [
+      {
+        id: 'plan-free',
+        code: 'free',
+        name: 'FREE',
+        tagline: 'Mulai Gratis Tanpa Kartu Kredit',
+        description: 'Untuk pengguna pemula, organisasi mahasiswa, dan komunitas kecil.',
+        price_idr: 0,
+        billing_model: 'per_event',
+        is_popular: false,
+        is_active: true,
+        sort_order: 1,
+        max_active_events: 1,
+        max_participants: 100,
+        max_team_members: 3,
+        max_storage_mb: 50,
+        allowed_modules: ['event_profile', 'timeline', 'team'],
+        features: [
+          '1 event aktif gratis',
+          'Event profile & landing page',
+          'Basic timeline dan rundown',
+          'Basic team management (maks 3 panitia)',
+          'Registrasi peserta maksimal 100 orang',
+          'Marketplace listing standar'
+        ],
+        trial_days: 0,
+        early_access_price_idr: null,
+        early_access_limit: 100,
+        community_discount_pct: 0,
+        allow_downgrade: true
+      },
+      {
+        id: 'plan-starter',
+        code: 'starter',
+        name: 'STARTER',
+        tagline: 'Tiket QR & Check-in Praktis',
+        description: 'Untuk event kecil hingga menengah seperti seminar, workshop, dan meetup kampus.',
+        price_idr: 49000,
+        billing_model: 'per_event',
+        is_popular: false,
+        is_active: true,
+        sort_order: 2,
+        max_active_events: 50,
+        max_participants: 500,
+        max_team_members: 10,
+        max_storage_mb: 250,
+        allowed_modules: [
+          'event_profile',
+          'timeline',
+          'tasks',
+          'team',
+          'ticketing',
+          'participants',
+          'check_in',
+          'documents',
+          'reports'
+        ],
+        features: [
+          'Semua fitur Free',
+          'Maksimal 500 peserta per event',
+          'Ticketing & QR Ticket otomatis via email',
+          'Participant & Check-in scanner gate',
+          'Task & Document management',
+          'Participant reports & basic branding'
+        ],
+        trial_days: 0,
+        early_access_price_idr: 39000,
+        early_access_limit: 100,
+        community_discount_pct: 20,
+        allow_downgrade: true
+      },
+      {
+        id: 'plan-pro',
+        code: 'pro',
+        name: 'PRO',
+        tagline: 'Paling Populer • All-in-One Studio',
+        description: 'Untuk event profesional dan organisasi yang membutuhkan pengelolaan lengkap.',
+        price_idr: 129000,
+        billing_model: 'per_event',
+        is_popular: true,
+        is_active: true,
+        sort_order: 3,
+        max_active_events: 100,
+        max_participants: 2000,
+        max_team_members: 25,
+        max_storage_mb: 1024,
+        allowed_modules: [
+          'event_profile',
+          'timeline',
+          'tasks',
+          'team',
+          'ticketing',
+          'participants',
+          'check_in',
+          'finance',
+          'vendors',
+          'sponsors',
+          'documents',
+          'feedback',
+          'reports'
+        ],
+        features: [
+          'Semua fitur Starter',
+          'Maksimal 2.000 peserta per event',
+          'Seluruh 13 modul manajemen event terbuka',
+          'Finance, budgeting & pencatatan kas otomatis',
+          'Vendor, Sponsor, Survey & Feedback',
+          'Advanced analytics, complete reporting & priority support'
+        ],
+        trial_days: 14,
+        early_access_price_idr: 99000,
+        early_access_limit: 100,
+        community_discount_pct: 25,
+        allow_downgrade: true
+      },
+      {
+        id: 'plan-ultimate',
+        code: 'ultimate',
+        name: 'ULTIMATE',
+        tagline: 'Skala Festival & Konferensi Besar',
+        description: 'Untuk festival, konferensi nasional, konser, dan event korporasi berskala besar.',
+        price_idr: 299000,
+        billing_model: 'per_event',
+        is_popular: false,
+        is_active: true,
+        sort_order: 4,
+        max_active_events: 999,
+        max_participants: 10000,
+        max_team_members: 100,
+        max_storage_mb: 5120,
+        allowed_modules: [
+          'event_profile',
+          'timeline',
+          'tasks',
+          'team',
+          'ticketing',
+          'participants',
+          'check_in',
+          'finance',
+          'vendors',
+          'sponsors',
+          'documents',
+          'feedback',
+          'reports'
+        ],
+        features: [
+          'Semua fitur Pro tanpa kompromi',
+          'Maksimal 10.000 peserta per event',
+          'Multi-team & granular role permission',
+          'Complete data export & advanced customization',
+          'Dedicated event support via WhatsApp & tim TERRA'
+        ],
+        trial_days: 0,
+        early_access_price_idr: 249000,
+        early_access_limit: 100,
+        community_discount_pct: 20,
+        allow_downgrade: true
+      }
+    ]
+
+    this.bundlePackages = [
+      {
+        id: 'bnd-pro-3',
+        code: 'bundle-3-pro',
+        name: '3 Event PRO Bundle',
+        plan_code: 'pro',
+        event_quota: 3,
+        bundle_price_idr: 299000,
+        description: 'Hemat Rp 88.000! Aktifkan paket PRO penuh untuk 3 event berbeda kapan saja.',
+        is_active: true
+      },
+      {
+        id: 'bnd-starter-3',
+        code: 'bundle-3-starter',
+        name: '3 Event STARTER Bundle',
+        plan_code: 'starter',
+        event_quota: 3,
+        bundle_price_idr: 119000,
+        description: 'Paket hemat organisasi & himpunan mahasiswa untuk 3 agenda event per tahun.',
+        is_active: true
+      }
+    ]
+
+    this.promoCodes = [
+      {
+        id: 'prm-early',
+        code: 'EARLY100',
+        name: 'Early Access 100 Organizer Pertama',
+        promo_type: 'early_access',
+        discount_type: 'percent',
+        discount_value: 20,
+        applies_to_plan: null,
+        requires_verification: false,
+        max_redemptions: 100,
+        used_count: 12,
+        is_active: true
+      },
+      {
+        id: 'prm-community',
+        code: 'BEMUKM25',
+        name: 'Diskon Komunitas, BEM & UKM Mahasiswa',
+        promo_type: 'community',
+        discount_type: 'percent',
+        discount_value: 25,
+        applies_to_plan: null,
+        requires_verification: true,
+        max_redemptions: null,
+        used_count: 5,
+        is_active: true
+      }
+    ]
+
+    this.eventSubscriptions = [
+      {
+        id: 'sub-evt-1',
+        event_id: 'evt-1',
+        organization_id: 'org-1',
+        plan_code: 'pro',
+        plan_name: 'PRO',
+        price_snapshot_idr: 129000,
+        limits_snapshot: {
+          max_active_events: 100,
+          max_participants: 2000,
+          max_team_members: 25,
+          max_storage_mb: 1024,
+          allowed_modules: [
+            'event_profile',
+            'timeline',
+            'tasks',
+            'team',
+            'ticketing',
+            'participants',
+            'check_in',
+            'finance',
+            'vendors',
+            'sponsors',
+            'documents',
+            'feedback',
+            'reports'
+          ]
+        },
+        status: 'active',
+        is_trial: false,
+        trial_started_at: null,
+        trial_ends_at: null,
+        activated_at: '2026-11-01T09:00:00Z'
+      },
+      {
+        id: 'sub-evt-2',
+        event_id: 'evt-2',
+        organization_id: 'org-2',
+        plan_code: 'pro',
+        plan_name: 'PRO',
+        price_snapshot_idr: 129000,
+        limits_snapshot: {
+          max_active_events: 100,
+          max_participants: 2000,
+          max_team_members: 25,
+          max_storage_mb: 1024,
+          allowed_modules: [
+            'event_profile',
+            'timeline',
+            'tasks',
+            'team',
+            'ticketing',
+            'participants',
+            'check_in',
+            'finance',
+            'vendors',
+            'sponsors',
+            'documents',
+            'feedback',
+            'reports'
+          ]
+        },
+        status: 'active',
+        is_trial: false,
+        trial_started_at: null,
+        trial_ends_at: null,
+        activated_at: '2026-11-01T09:00:00Z'
+      },
+      {
+        id: 'sub-evt-3',
+        event_id: 'evt-3',
+        organization_id: 'org-1',
+        plan_code: 'starter',
+        plan_name: 'STARTER',
+        price_snapshot_idr: 49000,
+        limits_snapshot: {
+          max_active_events: 50,
+          max_participants: 500,
+          max_team_members: 10,
+          max_storage_mb: 250,
+          allowed_modules: [
+            'event_profile',
+            'timeline',
+            'tasks',
+            'team',
+            'ticketing',
+            'participants',
+            'check_in',
+            'documents',
+            'reports'
+          ]
+        },
+        status: 'active',
+        is_trial: false,
+        trial_started_at: null,
+        trial_ends_at: null,
+        activated_at: '2026-11-05T09:00:00Z'
+      }
+    ]
+
+    this.bundleCredits = []
+    this.billingTransactions = []
+    this.billingAuditLogs = []
   }
 
   getEvent(eventId) {

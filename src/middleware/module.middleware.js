@@ -1,8 +1,9 @@
-import { store } from '../repositories/store.js'
+import * as db from '../repositories/db.js'
+import * as pricingDb from '../repositories/pricing.db.js'
 import { AppError } from '../utils/response.js'
 
 export function requireEventModule(moduleKey, resolveEventId = null) {
-  return (req, _res, next) => {
+  return async (req, _res, next) => {
     try {
       let eventId = req.params.id || req.params.eventId || req.body?.event_id
       if (!eventId && typeof resolveEventId === 'function') {
@@ -12,7 +13,11 @@ export function requireEventModule(moduleKey, resolveEventId = null) {
         return next(new AppError('ID event tidak ditemukan.', 400, 'EVENT_ID_REQUIRED'))
       }
 
-      if (!store.isModuleEnabled(eventId, moduleKey)) {
+      if (req.user?.role !== 'admin') {
+        await pricingDb.assertEventModuleAllowedByPlan(eventId, moduleKey)
+      }
+
+      if (!(await db.isModuleEnabled(eventId, moduleKey))) {
         return next(
           new AppError(
             `Modul "${moduleKey}" sedang nonaktif pada event ini. Aktifkan di Module Configuration terlebih dahulu.`,

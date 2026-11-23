@@ -1,5 +1,11 @@
 import { AppError } from '../utils/response.js'
-import { store } from '../repositories/store.js'
+import * as db from '../repositories/db.js'
+
+export const ALL_EVENT_PERMISSIONS = db.ALL_EVENT_PERMISSIONS
+
+export async function getUserEventPermissions(user, eventId) {
+  return db.getUserEventPermissions(user, eventId)
+}
 
 export function requireRole(...allowedRoles) {
   return (req, _res, next) => {
@@ -14,21 +20,47 @@ export function requireRole(...allowedRoles) {
 }
 
 export const requireAdmin = requireRole('admin')
+
 export const requireOrganizerOrAdmin = requireRole('organizer', 'admin')
 
-export function requireOrgMembership(req, _res, next) {
-  if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
-  if (req.user.role === 'admin') return next()
+export function requireEventPermission(permissionKey) {
+  return async (req, _res, next) => {
+    try {
+      if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
+      if (req.user.role === 'admin') return next()
 
-  const orgId = req.params.orgId || req.params.id || req.body?.organization_id
-  if (!orgId) return next()
+      const eventId = req.params.eventId || req.params.id || req.body?.event_id
+      if (!eventId) return next()
 
-  const org = store.organizations.find((o) => o.id === orgId)
-  if (!org) return next(new AppError('Organisasi tidak ditemukan.', 404, 'ORG_NOT_FOUND'))
-
-  const isMember = org.members.some((m) => m.user_id === req.user.id && m.status === 'active')
-  if (!isMember && org.created_by !== req.user.id) {
-    return next(new AppError('Akses ditolak: Anda bukan anggota organisasi ini.', 403, 'ORG_FORBIDDEN'))
+      const perms = await db.getUserEventPermissions(req.user, eventId)
+      if (!perms.includes(permissionKey)) {
+        return next(
+          new AppError(
+            `Akses ditolak: Anda tidak memiliki izin "${permissionKey}" untuk event ini.`,
+            403,
+            'FORBIDDEN_PERMISSION'
+          )
+        )
+      }
+      next()
+    } catch (err) {
+      next(err)
+    }
   }
-  next()
+}
+
+export function requireOrgMembership(req, _res, next) {
+  ;(async () => {
+    if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
+    if (req.user.role === 'admin') return next()
+
+    const orgId = req.params.orgId || req.params.id || req.body?.organization_id
+    if (!orgId) return next()
+
+    const { allowed } = await db.isOrgMember(orgId, req.user)
+    if (!allowed) {
+      return next(new AppError('Akses ditolak: Anda bukan anggota organisasi ini.', 403, 'ORG_FORBIDDEN'))
+    }
+    next()
+  })().catch(next)
 }

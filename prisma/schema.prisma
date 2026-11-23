@@ -1,0 +1,859 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Customer {
+  id             String    @id @default(uuid())
+  full_name      String
+  username       String?   @unique
+  email          String    @unique
+  password_hash  String?
+  avatar_url     String?
+  phone          String?
+  bio            String?
+  provider       String    @default("email")
+  email_verified Boolean   @default(true)
+  otp_code_hash           String?
+  otp_expires_at          DateTime?
+  otp_attempts            Int       @default(0)
+  is_suspended            Boolean   @default(false)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  orders           Order[]
+  participants     Participant[]
+  reports          EventReport[]
+  companionPosts   EventCompanionPost[]
+  companionReplies EventCompanionReply[]
+
+  @@map("customers")
+}
+
+model Organizer {
+  id             String    @id @default(uuid())
+  full_name      String
+  username       String?   @unique
+  email          String    @unique
+  password_hash  String?
+  avatar_url     String?
+  phone          String?
+  bio            String?
+  provider       String    @default("email")
+  email_verified Boolean   @default(true)
+  otp_code_hash           String?
+  otp_expires_at          DateTime?
+  otp_attempts            Int       @default(0)
+  is_suspended            Boolean   @default(false)
+  subscription_plan       String    @default("free_trial")
+  subscription_status     String    @default("trialing")
+  subscription_expires_at DateTime?
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  organizations       Organization[]       @relation("OrganizationCreator")
+  organizationMembers OrganizationMember[]
+  events              Event[]              @relation("EventCreator")
+  teamMembers         TeamMember[]
+  activityLogs        ActivityLog[]
+
+  @@map("organizers")
+}
+
+model Admin {
+  id             String    @id @default(uuid())
+  full_name      String
+  username       String?   @unique
+  email          String    @unique
+  password_hash  String?
+  avatar_url     String?
+  phone          String?
+  bio            String?
+  provider       String    @default("email")
+  email_verified Boolean   @default(true)
+  otp_code_hash           String?
+  otp_expires_at          DateTime?
+  otp_attempts            Int       @default(0)
+  is_suspended            Boolean   @default(false)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  moderationLogs        EventModerationLog[]
+  reviewedVerifications OrganizerVerification[]
+
+  @@map("admins")
+}
+
+model Organization {
+  id                  String    @id @default(uuid())
+  name                String
+  slug                String    @unique
+  description         String?
+  logo_url            String?
+  cover_url           String?
+  email               String
+  phone               String?
+  website             String?
+  social_links        Json      @default("{}")
+  verification_status String    @default("pending")
+  created_by          String?
+  deleted_at          DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  creator             Organizer?                @relation("OrganizationCreator", fields: [created_by], references: [id], onDelete: SetNull)
+  members             OrganizationMember[]
+  events              Event[]
+  verifications       OrganizerVerification[]
+  eventSubscriptions  EventSubscription[]
+  bundleCredits       OrganizationBundleCredit[]
+  billingTransactions BillingTransaction[]
+
+  @@index([created_by])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id              String   @id @default(uuid())
+  organization_id String
+  user_id         String?
+  name            String?
+  email           String
+  role            String   @default("Staff")
+  status          String   @default("active")
+  joined_at       DateTime @default(now())
+
+  organization Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  organizer    Organizer?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@unique([organization_id, email])
+  @@index([user_id])
+  @@map("organization_members")
+}
+
+model Category {
+  id          String  @id @default(uuid())
+  name        String
+  slug        String  @unique
+  description String?
+  icon        String?
+  image_url   String?
+  sort_order  Int     @default(0)
+  is_active   Boolean @default(true)
+
+  events Event[]
+
+  @@map("categories")
+}
+
+model Event {
+  id                 String    @id @default(uuid())
+  organization_id    String
+  title              String
+  slug               String    @unique
+  description        String?
+  category_id        String?
+  category           String?
+  poster_url         String?
+  banner_url         String?
+  gallery            Json      @default("[]")
+  speakers           Json      @default("[]")
+  location_type      String    @default("offline")
+  location_name      String?
+  address            String?
+  latitude           Float?
+  longitude          Float?
+  online_url         String?
+  start_at           String
+  end_at             String
+  timezone           String    @default("Asia/Jakarta")
+  capacity           Int       @default(0)
+  status             String    @default("Draft")
+  publication_status String    @default("Unpublished")
+  visibility         String    @default("public")
+  is_featured        Boolean   @default(false)
+  terms              String?
+  contact_email      String?
+  contact_phone      String?
+  enabled_modules    Json      @default("[\"event_profile\",\"timeline\",\"tasks\",\"team\",\"ticketing\",\"participants\",\"check_in\",\"finance\",\"vendors\",\"sponsors\",\"documents\",\"reports\",\"feedback\"]")
+  created_by         String?
+  published_at       DateTime?
+  deleted_at         DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  organization   Organization          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  categoryRef    Category?             @relation(fields: [category_id], references: [id], onDelete: SetNull)
+  creator        Organizer?            @relation("EventCreator", fields: [created_by], references: [id], onDelete: SetNull)
+  teamMembers    TeamMember[]
+  teamInvites    TeamInvite[]
+  schedules      EventSchedule[]
+  tasks          EventTask[]
+  ticketTypes    TicketType[]
+  orders         Order[]
+  participants   Participant[]
+  tickets        Ticket[]
+  checkinLogs    CheckinLog[]
+  budget         EventBudget?
+  incomes        FinanceIncome[]
+  expenses       FinanceExpense[]
+  vendors        Vendor[]
+  sponsors       Sponsor[]
+  documents      EventDocument[]
+  surveys        EventSurvey[]
+  moderationLogs EventModerationLog[]
+  reports             EventReport[]
+  companionPosts      EventCompanionPost[]
+  subscription        EventSubscription?
+  billingTransactions BillingTransaction[]
+
+  @@index([organization_id])
+  @@index([publication_status, status])
+  @@map("events")
+}
+
+model TeamMember {
+  id           String    @id @default(uuid())
+  event_id     String
+  user_id      String?
+  name         String
+  email        String
+  role         String    @default("Staff")
+  department   String    @default("General")
+  permissions  Json      @default("[\"View Event\"]")
+  status       String    @default("Active")
+  invite_token String?   @unique
+  invited_at   DateTime?
+  accepted_at  DateTime?
+
+  event     Event       @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  organizer Organizer?  @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  invite    TeamInvite?
+
+  @@unique([event_id, email])
+  @@index([user_id])
+  @@map("team_members")
+}
+
+model TeamInvite {
+  id           String    @id @default(uuid())
+  token        String    @unique
+  member_id    String    @unique
+  event_id     String
+  event_title  String
+  email        String
+  name         String
+  role         String
+  department   String
+  permissions  Json      @default("[]")
+  inviter_name String    @default("Organizer")
+  status       String    @default("Pending")
+  accepted_at  DateTime?
+  created_at   DateTime  @default(now())
+
+  event  Event      @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  member TeamMember @relation(fields: [member_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("team_invites")
+}
+
+model EventSchedule {
+  id          String   @id @default(uuid())
+  event_id    String
+  title       String
+  description String?
+  date        String
+  start_time  String
+  end_time    String
+  location    String?
+  pic         String?
+  visibility  String   @default("public")
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("event_schedules")
+}
+
+model EventTask {
+  id          String   @id @default(uuid())
+  event_id    String
+  parent_id   String?
+  is_group    Boolean  @default(false)
+  title       String
+  description String?
+  phase       String   @default("Production")
+  assigned_to String?
+  priority    String   @default("Medium")
+  status      String   @default("To Do")
+  start_date  String?
+  due_at      String?
+  due_date    String?
+  progress    Int      @default(0)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  event    Event         @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  parent   EventTask?    @relation("TaskHierarchy", fields: [parent_id], references: [id], onDelete: Cascade)
+  subtasks EventTask[]   @relation("TaskHierarchy")
+  comments TaskComment[]
+
+  @@index([event_id, parent_id])
+  @@map("event_tasks")
+}
+
+model TaskComment {
+  id         String   @id @default(uuid())
+  task_id    String
+  user_id    String
+  author     String
+  content    String
+  created_at DateTime @default(now())
+
+  task EventTask @relation(fields: [task_id], references: [id], onDelete: Cascade)
+
+  @@index([task_id])
+  @@map("task_comments")
+}
+
+model TicketType {
+  id            String   @id @default(uuid())
+  event_id      String
+  name          String
+  description   String?
+  price         Float    @default(0)
+  currency      String   @default("IDR")
+  quantity      Int
+  sold_quantity Int      @default(0)
+  min_per_order Int      @default(1)
+  max_per_order Int      @default(5)
+  status        String   @default("On Sale")
+  visibility    String   @default("public")
+  created_at    DateTime @default(now())
+
+  event      Event       @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  tickets    Ticket[]
+
+  @@index([event_id])
+  @@map("ticket_types")
+}
+
+model Order {
+  id             String   @id @default(uuid())
+  order_number   String   @unique
+  event_id       String
+  customer_id    String?
+  ticket_type_id String?
+  quantity       Int      @default(1)
+  subtotal       Float    @default(0)
+  total          Float    @default(0)
+  currency       String   @default("IDR")
+  order_status   String   @default("Confirmed")
+  payment_status String   @default("Paid")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  event        Event         @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  customer     Customer?     @relation(fields: [customer_id], references: [id], onDelete: SetNull)
+  items        OrderItem[]
+  participants Participant[]
+  tickets      Ticket[]
+
+  @@index([event_id])
+  @@index([customer_id])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String @id @default(uuid())
+  order_id       String
+  ticket_type_id String
+  quantity       Int
+  unit_price     Float
+  subtotal       Float
+
+  order      Order      @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticket_type_id], references: [id], onDelete: Restrict)
+
+  @@map("order_items")
+}
+
+model Participant {
+  id                  String   @id @default(uuid())
+  event_id            String
+  order_id            String?
+  user_id             String?
+  full_name           String
+  email               String
+  phone               String?
+  ticket_type         String?
+  ticket_code         String?
+  order_number        String?
+  registration_data   Json     @default("{}")
+  registration_status String   @default("Confirmed")
+  checked_in          Boolean  @default(false)
+  created_at          DateTime @default(now())
+
+  event    Event     @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  order    Order?    @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  customer Customer? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  tickets  Ticket[]
+
+  @@index([event_id])
+  @@map("participants")
+}
+
+model Ticket {
+  id               String   @id @default(uuid())
+  event_id         String
+  event_title      String?
+  event_date       String?
+  location         String?
+  order_id         String?
+  order_number     String?
+  attendee_id      String
+  ticket_type_id   String?
+  ticket_type      String?
+  ticket_code      String   @unique
+  qr_payload       String
+  qr_token_hash    String   @unique
+  participant_name String?
+  status           String   @default("Active")
+  issued_at        DateTime @default(now())
+  used_at          String?
+
+  event      Event       @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  order      Order?      @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  attendee   Participant @relation(fields: [attendee_id], references: [id], onDelete: Cascade)
+  ticketType TicketType? @relation(fields: [ticket_type_id], references: [id], onDelete: SetNull)
+  checkinLog CheckinLog?
+
+  @@index([event_id])
+  @@map("tickets")
+}
+
+model CheckinLog {
+  id               String  @id @default(uuid())
+  event_id         String
+  ticket_id        String  @unique
+  ticket_code      String
+  participant_name String?
+  ticket_type      String?
+  station          String  @default("Gate A - Main Lobby")
+  checked_in_by    String?
+  checked_in_at    String
+
+  event  Event  @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("checkin_logs")
+}
+
+model EventBudget {
+  id         String   @id @default(uuid())
+  event_id   String   @unique
+  amount     Float    @default(0)
+  currency   String   @default("IDR")
+  updated_at DateTime @updatedAt
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@map("event_budgets")
+}
+
+model FinanceIncome {
+  id          String   @id @default(uuid())
+  event_id    String
+  category    String
+  description String
+  amount      Float
+  currency    String   @default("IDR")
+  date        String
+  created_by  String?
+  created_at  DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("finance_incomes")
+}
+
+model FinanceExpense {
+  id          String   @id @default(uuid())
+  event_id    String
+  category    String
+  description String
+  amount      Float
+  currency    String   @default("IDR")
+  date        String
+  vendor_id   String?
+  created_by  String?
+  created_at  DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("finance_expenses")
+}
+
+model Vendor {
+  id           String   @id @default(uuid())
+  event_id     String
+  name         String
+  category     String
+  contact      String?
+  contact_name String?
+  email        String?
+  phone        String?
+  value        String?
+  notes        String?
+  status       String   @default("Pending")
+  created_at   DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("vendors")
+}
+
+model Sponsor {
+  id              String   @id @default(uuid())
+  event_id        String
+  name            String
+  tier            String?
+  category        String?
+  contribution    String?
+  pic             String?
+  benefits        String?
+  contact_details String?
+  status          String   @default("Pending")
+  created_at      DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("sponsors")
+}
+
+model EventDocument {
+  id          String   @id @default(uuid())
+  event_id    String
+  uploaded_by String?
+  file_name   String
+  file_path   String
+  category    String   @default("Operasional")
+  visibility  String   @default("internal")
+  created_at  DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("event_documents")
+}
+
+model EventSurvey {
+  id          String   @id @default(uuid())
+  event_id    String
+  title       String
+  description String?
+  is_active   Boolean  @default(true)
+  responses   Json     @default("[]")
+  created_at  DateTime @default(now())
+
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id])
+  @@map("event_surveys")
+}
+
+model OrganizerVerification {
+  id                  String   @id @default(uuid())
+  organization_id     String
+  submitted_by        String?
+  verification_status String   @default("pending")
+  documents           Json     @default("[]")
+  review_notes        String?
+  reviewed_by         String?
+  reviewed_at         String?
+
+  organization Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  reviewer     Admin?       @relation(fields: [reviewed_by], references: [id], onDelete: SetNull)
+
+  @@index([organization_id])
+  @@map("organizer_verifications")
+}
+
+model EventModerationLog {
+  id         String   @id @default(uuid())
+  event_id   String
+  admin_id   String?
+  action     String
+  notes      String?
+  created_at DateTime @default(now())
+
+  event Event  @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  admin Admin? @relation(fields: [admin_id], references: [id], onDelete: SetNull)
+
+  @@index([event_id])
+  @@map("event_moderation_logs")
+}
+
+model EventReport {
+  id          String   @id @default(uuid())
+  event_id    String
+  reporter_id String?
+  reason      String
+  description String?
+  status      String   @default("open")
+  reviewed_by String?
+  created_at  DateTime @default(now())
+
+  event    Event     @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  reporter Customer? @relation(fields: [reporter_id], references: [id], onDelete: SetNull)
+
+  @@index([event_id])
+  @@map("event_reports")
+}
+
+model UserNotification {
+  id             String   @id @default(uuid())
+  user_id        String
+  user_role      String   @default("organizer")
+  title          String
+  message        String
+  type           String   @default("info")
+  reference_type String?
+  reference_id   String?
+  is_read        Boolean  @default(false)
+  created_at     DateTime @default(now())
+
+  @@index([user_id])
+  @@map("user_notifications")
+}
+
+model ActivityLog {
+  id              String   @id @default(uuid())
+  organization_id String?
+  event_id        String?
+  user_id         String?
+  action          String
+  entity_type     String
+  metadata        Json     @default("{}")
+  created_at      DateTime @default(now())
+
+  organizer Organizer? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([event_id])
+  @@map("activity_logs")
+}
+
+model EventCompanionPost {
+  id              String   @id @default(uuid())
+  event_id        String
+  author_id       String
+  title           String
+  departure_city  String
+  departure_point String
+  departure_time  String?
+  transport_mode  String   @default("KRL / MRT / TransJakarta")
+  slots_available Int      @default(3)
+  contact_note    String?
+  notes           String
+  status          String   @default("open")
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  event   Event                 @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  author  Customer              @relation(fields: [author_id], references: [id], onDelete: Cascade)
+  replies EventCompanionReply[]
+
+  @@index([event_id])
+  @@index([author_id])
+  @@map("event_companion_posts")
+}
+
+model EventCompanionReply {
+  id         String   @id @default(uuid())
+  post_id    String
+  author_id  String
+  message    String
+  created_at DateTime @default(now())
+
+  post   EventCompanionPost @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  author Customer           @relation(fields: [author_id], references: [id], onDelete: Cascade)
+
+  @@index([post_id])
+  @@map("event_companion_replies")
+}
+
+model PricingPlan {
+  id                     String    @id @default(uuid())
+  code                   String    @unique
+  name                   String
+  tagline                String?
+  description            String?
+  price_idr              Int       @default(0)
+  billing_model          String    @default("per_event")
+  is_popular             Boolean   @default(false)
+  is_active              Boolean   @default(true)
+  sort_order             Int       @default(0)
+  max_active_events      Int       @default(1)
+  max_participants       Int       @default(100)
+  max_team_members       Int       @default(3)
+  max_storage_mb         Int       @default(50)
+  allowed_modules        Json      @default("[]")
+  features               Json      @default("[]")
+  trial_days             Int       @default(0)
+  early_access_price_idr Int?
+  early_access_limit     Int       @default(100)
+  early_access_starts_at DateTime?
+  early_access_ends_at   DateTime?
+  community_discount_pct Int       @default(0)
+  allow_downgrade        Boolean   @default(true)
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  @@map("pricing_plans")
+}
+
+model BundlePackage {
+  id               String   @id @default(uuid())
+  code             String   @unique
+  name             String
+  plan_code        String   @default("pro")
+  event_quota      Int      @default(3)
+  bundle_price_idr Int      @default(299000)
+  description      String?
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  @@map("bundle_packages")
+}
+
+model PromoCode {
+  id                    String    @id @default(uuid())
+  code                  String    @unique
+  name                  String
+  promo_type            String    @default("promo")
+  discount_type         String    @default("percent")
+  discount_value        Int       @default(0)
+  applies_to_plan       String?
+  requires_verification Boolean   @default(false)
+  max_redemptions       Int?
+  used_count            Int       @default(0)
+  starts_at             DateTime?
+  ends_at               DateTime?
+  is_active             Boolean   @default(true)
+  created_at            DateTime  @default(now())
+
+  @@map("promo_codes")
+}
+
+model EventSubscription {
+  id                 String    @id @default(uuid())
+  event_id           String    @unique
+  organization_id    String
+  plan_code          String    @default("free")
+  plan_name          String    @default("FREE")
+  price_snapshot_idr Int       @default(0)
+  limits_snapshot    Json      @default("{}")
+  status             String    @default("active")
+  is_trial           Boolean   @default(false)
+  trial_started_at   DateTime?
+  trial_ends_at      DateTime?
+  activated_at       DateTime  @default(now())
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  event        Event        @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
+  @@index([plan_code])
+  @@map("event_subscriptions")
+}
+
+model OrganizationBundleCredit {
+  id                String   @id @default(uuid())
+  organization_id   String
+  bundle_id         String?
+  bundle_name       String
+  plan_code         String
+  total_credits     Int
+  remaining_credits Int
+  transaction_id    String?
+  created_at        DateTime @default(now())
+
+  organization Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
+  @@map("organization_bundle_credits")
+}
+
+model BillingTransaction {
+  id                  String    @id @default(uuid())
+  invoice_number      String    @unique
+  organization_id     String
+  organizer_id        String
+  event_id            String?
+  target_type         String    @default("event_plan")
+  plan_code           String
+  plan_name           String
+  bundle_id           String?
+  promo_code          String?
+  community_org_proof String?
+  payment_method      String    @default("manual_whatsapp")
+  base_price_idr      Int       @default(0)
+  discount_idr        Int       @default(0)
+  upgrade_credit_idr  Int       @default(0)
+  final_amount_idr    Int       @default(0)
+  plan_snapshot       Json      @default("{}")
+  payment_proof_url   String?
+  payment_notes       String?
+  admin_notes         String?
+  verified_by         String?
+  verified_at         DateTime?
+  status              String    @default("Pending")
+  expires_at          DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  event        Event?       @relation(fields: [event_id], references: [id], onDelete: SetNull)
+
+  @@index([organization_id])
+  @@index([organizer_id])
+  @@index([event_id])
+  @@index([status])
+  @@map("billing_transactions")
+}
+
+model BillingAuditLog {
+  id              String   @id @default(uuid())
+  organization_id String?
+  event_id        String?
+  actor_id        String?
+  actor_role      String?
+  action          String
+  from_plan       String?
+  to_plan         String?
+  details         Json     @default("{}")
+  created_at      DateTime @default(now())
+
+  @@index([organization_id])
+  @@index([event_id])
+  @@map("billing_audit_logs")
+}

@@ -1,6 +1,7 @@
 import { Router } from 'express'
+import { env } from '../config/env.js'
 import { requireAuth } from '../middleware/auth.middleware.js'
-import { requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
+import { requireEventPermission, requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
 import { requireEventModule } from '../middleware/module.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
 import {
@@ -10,193 +11,147 @@ import {
   bulkModulesSchema,
   teamMemberSchema
 } from '../validators/schemas.js'
-import { store, MODULE_CATALOG, slugify } from '../repositories/store.js'
-import { sendSuccess, AppError } from '../utils/response.js'
+import * as db from '../repositories/db.js'
+import * as pricingDb from '../repositories/pricing.db.js'
+import { MODULE_CATALOG } from '../repositories/store.js'
+import { sendTeamInviteEmail } from '../services/email.service.js'
+import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
 
-function enrichEvent(evt) {
-  return {
-    ...evt,
-    organization: store.organizations.find((o) => o.id === evt.organization_id) || null,
-    ticket_types: store.ticketTypes.filter((t) => t.event_id === evt.id),
-    schedules: store.schedules.filter((s) => s.event_id === evt.id),
-    speakers: evt.speakers || []
-  }
-}
-
-router.get('/events', requireAuth, requireOrganizerOrAdmin, (req, res) => {
+router.get('/events', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
   const { organization_id, status } = req.query
-  let list = store.events.filter((e) => !e.deleted_at)
-  if (organization_id) list = list.filter((e) => e.organization_id === organization_id)
-  if (status) list = list.filter((e) => e.status === status)
-  return sendSuccess(res, list.map(enrichEvent))
-})
+  const list = await db.listEventsForUser(req.user, { organization_id, status })
+  return sendSuccess(res, list)
+}))
 
-router.post('/events', requireAuth, requireOrganizerOrAdmin, validateBody(eventCreateSchema), (req, res) => {
-  const data = req.validatedBody
-  const slug = data.slug || `${slugify(data.title)}-${Date.now().toString().slice(-4)}`
-  if (store.events.some((e) => e.slug === slug && !e.deleted_at)) {
-    throw new AppError('Slug event sudah terdaftar.', 409, 'DUPLICATE_SLUG')
-  }
+router.post('/events', requireAuth, requireOrganizerOrAdmin, validateBody(eventCreateSchema), asyncHandler(async (req, res) => {
+  const evt = await db.createEvent(req.validatedBody, req.user)
+  return sendSuccess(res, evt, 'Event berhasil dibuat.', 201)
+}))
 
-  const evt = {
-    id: 'evt-' + Date.now(),
-    ...data,
-    slug,
-    poster_url: data.poster_url || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=900&q=80',
-    banner_url: data.banner_url || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=1400&q=80',
-    gallery: data.gallery || [],
-    speakers: [],
-    status: 'Draft',
-    publication_status: 'Published',
-    is_featured: false,
-    enabled_modules: ['event_profile', 'timeline', 'tasks', 'team', 'ticketing', 'participants', 'check_in', 'finance', 'vendors', 'sponsors', 'documents', 'reports', 'feedback'],
-    created_by: req.user.id,
-    deleted_at: null
-  }
-  store.events.unshift(evt)
-  return sendSuccess(res, enrichEvent(evt), 'Event berhasil dibuat.', 201)
-})
+router.get('/events/:id', requireAuth, requireOrganizerOrAdmin, requireEventPermission('View Event'), asyncHandler(async (req, res) => {
+  const evt = await db.getEnrichedEvent(req.params.id, req.user)
+  return sendSuccess(res, evt)
+}))
 
-router.get('/events/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  return sendSuccess(res, enrichEvent(evt))
-})
-
-router.patch('/events/:id', requireAuth, requireOrganizerOrAdmin, validateBody(eventUpdateSchema), (req, res) => {
-  const evt = store.getEvent(req.params.id)
+router.patch('/events/:id', requireAuth, requireOrganizerOrAdmin, requireEventPermission('Edit Event'), validateBody(eventUpdateSchema), asyncHandler(async (req, res) => {
   const { schedules, ...rest } = req.validatedBody
-  Object.assign(evt, rest)
+  const evt = await db.updateEvent(req.params.id, rest, schedules)
+  return sendSuccess(res, evt, 'Data event diperbarui.')
+}))
 
-  if (Array.isArray(schedules)) {
-    store.schedules = store.schedules.filter((s) => s.event_id !== evt.id)
-    const mapped = schedules.map((s, idx) => ({
-      id: s.id || `sch-${Date.now()}-${idx}`,
-      event_id: evt.id,
-      date: s.date || (evt.start_at ? evt.start_at.slice(0, 10) : '2026-12-12'),
-      ...s
-    }))
-    store.schedules.push(...mapped)
-  }
+router.delete('/events/:id', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const result = await db.softDeleteEvent(req.params.id)
+  return sendSuccess(res, result, 'Event berhasil dihapus.')
+}))
 
-  return sendSuccess(res, enrichEvent(evt), 'Data event diperbarui.')
-})
+router.post('/events/:id/duplicate', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const copy = await db.duplicateEvent(req.params.id, req.user)
+  return sendSuccess(res, copy, 'Event berhasil diduplikasi.', 201)
+}))
 
-router.delete('/events/:id', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  evt.deleted_at = new Date().toISOString()
-  return sendSuccess(res, { id: evt.id }, 'Event berhasil dihapus.')
-})
+router.post('/events/:id/submit-review', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const evt = await db.updateEvent(req.params.id, { publication_status: 'Pending Review' })
+  return sendSuccess(res, evt, 'Event diajukan untuk moderasi Admin.')
+}))
 
-router.post('/events/:id/duplicate', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const source = store.getEvent(req.params.id)
-  const newId = 'evt-' + Date.now()
-  const copy = {
-    ...structuredClone(source),
-    id: newId,
-    title: `${source.title} (Copy)`,
-    slug: `${source.slug}-copy-${Math.floor(100 + Math.random() * 900)}`,
-    status: 'Draft',
-    publication_status: 'Unpublished'
-  }
-  store.events.unshift(copy)
-  return sendSuccess(res, enrichEvent(copy), 'Event berhasil diduplikasi.', 201)
-})
-
-router.post('/events/:id/submit-review', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  evt.publication_status = 'Pending Review'
-  return sendSuccess(res, enrichEvent(evt), 'Event diajukan untuk moderasi Admin.')
-})
-
-router.post('/events/:id/publish', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  if (!['Approved', 'Published'].includes(evt.publication_status)) {
+router.post('/events/:id/publish', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const current = await db.getEventOrThrow(req.params.id)
+  if (!['Approved', 'Published'].includes(current.publication_status)) {
     throw new AppError('Event belum disetujui Admin untuk dipublikasikan.', 403, 'EVENT_NOT_APPROVED')
   }
-  evt.publication_status = 'Published'
-  evt.status = 'Published'
-  return sendSuccess(res, enrichEvent(evt), 'Event dipublikasikan ke marketplace.')
-})
+  const evt = await db.updateEvent(req.params.id, {
+    publication_status: 'Published',
+    status: 'Published'
+  })
+  return sendSuccess(res, evt, 'Event dipublikasikan ke marketplace.')
+}))
 
-router.post('/events/:id/unpublish', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  evt.publication_status = 'Unpublished'
-  return sendSuccess(res, enrichEvent(evt), 'Publikasi event ditarik dari marketplace.')
-})
+router.post('/events/:id/unpublish', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const evt = await db.updateEvent(req.params.id, { publication_status: 'Unpublished' })
+  return sendSuccess(res, evt, 'Publikasi event ditarik dari marketplace.')
+}))
 
 // Event Modules Configuration
-router.get('/events/:id/modules', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
+router.get('/events/:id/modules', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const [evt, entitlement] = await Promise.all([
+    db.getEventOrThrow(req.params.id),
+    pricingDb.ensureEventEntitlement(req.params.id)
+  ])
+  const allowedSet = new Set(entitlement.allowed_modules || [])
   const modules = MODULE_CATALOG.map((m) => ({
     ...m,
-    is_enabled: evt.enabled_modules.includes(m.key)
+    is_enabled: evt.enabled_modules.includes(m.key),
+    allowed_by_plan: m.key === 'event_profile' || allowedSet.has(m.key),
+    requires_upgrade: m.key !== 'event_profile' && !allowedSet.has(m.key)
   }))
-  return sendSuccess(res, { event_id: evt.id, enabled_modules: evt.enabled_modules, modules })
-})
+  return sendSuccess(res, { event_id: evt.id, enabled_modules: evt.enabled_modules, entitlement, modules })
+}))
 
-router.put('/events/:id/modules', requireAuth, requireOrganizerOrAdmin, validateBody(bulkModulesSchema), (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  const requested = new Set(req.validatedBody.enabled_modules)
-  requested.add('event_profile')
-  if ((requested.has('participants') || requested.has('check_in')) && !requested.has('ticketing')) {
-    throw new AppError('Modul participants dan check_in membutuhkan modul ticketing aktif.', 400, 'MODULE_DEPENDENCY_UNMET')
-  }
-  evt.enabled_modules = [...requested]
-  return sendSuccess(res, { enabled_modules: evt.enabled_modules }, 'Konfigurasi modul disimpan.')
-})
+router.put('/events/:id/modules', requireAuth, requireOrganizerOrAdmin, validateBody(bulkModulesSchema), asyncHandler(async (req, res) => {
+  const enabled = await db.setEventModules(req.params.id, req.validatedBody.enabled_modules)
+  return sendSuccess(res, { enabled_modules: enabled }, 'Konfigurasi modul disimpan.')
+}))
 
-router.get('/events/:id/modules/:moduleKey', requireAuth, requireOrganizerOrAdmin, (req, res) => {
-  const evt = store.getEvent(req.params.id)
+router.get('/events/:id/modules/:moduleKey', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
+  const evt = await db.getEventOrThrow(req.params.id)
   const mod = MODULE_CATALOG.find((m) => m.key === req.params.moduleKey)
   if (!mod) throw new AppError('Modul tidak ditemukan.', 404, 'INVALID_MODULE')
   return sendSuccess(res, { ...mod, is_enabled: evt.enabled_modules.includes(mod.key) })
-})
+}))
 
-router.patch('/events/:id/modules/:moduleKey', requireAuth, requireOrganizerOrAdmin, validateBody(moduleConfigSchema), (req, res) => {
-  const enabledModules = store.toggleModule(
+router.patch('/events/:id/modules/:moduleKey', requireAuth, requireOrganizerOrAdmin, validateBody(moduleConfigSchema), asyncHandler(async (req, res) => {
+  const enabledModules = await db.toggleEventModule(
     req.params.id,
     req.params.moduleKey,
     req.validatedBody.is_enabled,
     req.user.id
   )
   return sendSuccess(res, { enabled_modules: enabledModules }, 'Status modul diperbarui.')
-})
+}))
 
 // Team & Access Management per Event
-router.get('/events/:id/team', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), (req, res) => {
-  return sendSuccess(res, store.teamMembers.filter((m) => m.event_id === req.params.id))
-})
+router.get('/events/:id/team', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), requireEventPermission('View Event'), asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listTeamMembers(req.params.id))
+}))
 
-router.post('/events/:id/team', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), validateBody(teamMemberSchema), (req, res) => {
-  const data = req.validatedBody
-  const defaultPerms = data.role === 'Staff'
-    ? ['View Event', 'Manage Check-in']
-    : ['View Event', 'Edit Event', 'Manage Timeline']
-  const member = {
-    id: 'tm-' + Date.now(),
-    event_id: req.params.id,
-    name: data.name || data.email.split('@')[0],
-    email: data.email,
-    role: data.role,
-    department: data.department,
-    permissions: data.permissions || defaultPerms
-  }
-  store.teamMembers.push(member)
-  return sendSuccess(res, member, 'Anggota panitia berhasil diundang.', 201)
-})
+router.post('/events/:id/team', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), requireEventPermission('Manage Team'), validateBody(teamMemberSchema), asyncHandler(async (req, res) => {
+  const { evt, member, inviteToken, permissions } = await db.createTeamInvite(req.params.id, req.validatedBody, req.user)
+  const inviteUrl = `${env.frontendUrl}/accept-invite?token=${inviteToken}`
+  const emailStatus = await sendTeamInviteEmail({
+    to: member.email,
+    inviteeName: member.name,
+    inviterName: req.user?.full_name || 'Organizer',
+    eventTitle: evt.title,
+    role: member.role,
+    department: member.department,
+    permissions,
+    inviteUrl
+  })
 
-router.patch('/events/:id/team/:memberId', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), (req, res) => {
-  const member = store.teamMembers.find((m) => m.id === req.params.memberId && m.event_id === req.params.id)
-  if (!member) throw new AppError('Anggota panitia tidak ditemukan.', 404, 'TEAM_MEMBER_NOT_FOUND')
-  Object.assign(member, req.body)
+  return sendSuccess(
+    res,
+    {
+      member,
+      invite_url: inviteUrl,
+      email_status: emailStatus
+    },
+    emailStatus.sent
+      ? 'Undangan panitia dikirim via email (Resend).'
+      : 'Anggota panitia ditambahkan. Bagikan tautan undangan secara manual atau lengkapi RESEND_API_KEY.',
+    201
+  )
+}))
+
+router.patch('/events/:id/team/:memberId', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), requireEventPermission('Manage Team'), asyncHandler(async (req, res) => {
+  const member = await db.updateTeamMember(req.params.id, req.params.memberId, req.body)
   return sendSuccess(res, member, 'Hak akses anggota diperbarui.')
-})
+}))
 
-router.delete('/events/:id/team/:memberId', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), (req, res) => {
-  store.teamMembers = store.teamMembers.filter((m) => !(m.id === req.params.memberId && m.event_id === req.params.id))
-  return sendSuccess(res, { id: req.params.memberId }, 'Anggota panitia dihapus.')
-})
+router.delete('/events/:id/team/:memberId', requireAuth, requireOrganizerOrAdmin, requireEventModule('team'), requireEventPermission('Manage Team'), asyncHandler(async (req, res) => {
+  const result = await db.deleteTeamMember(req.params.id, req.params.memberId)
+  return sendSuccess(res, result, 'Anggota panitia dihapus.')
+}))
 
 export default router

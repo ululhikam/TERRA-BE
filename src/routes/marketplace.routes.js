@@ -1,109 +1,93 @@
 import { Router } from 'express'
-import { optionalAuth } from '../middleware/auth.middleware.js'
+import { optionalAuth, requireAuth } from '../middleware/auth.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
-import { reportCreateSchema } from '../validators/schemas.js'
-import { store } from '../repositories/store.js'
-import { sendSuccess, AppError } from '../utils/response.js'
+import {
+  reportCreateSchema,
+  companionPostCreateSchema,
+  companionPostUpdateSchema,
+  companionReplyCreateSchema
+} from '../validators/schemas.js'
+import * as db from '../repositories/db.js'
+import { sendSuccess, asyncHandler } from '../utils/response.js'
 
 const router = Router()
 
-function getPublicEvents() {
-  return store.events.filter((e) => !e.deleted_at && e.publication_status === 'Published' && e.visibility === 'public')
-}
+router.get('/marketplace/events', asyncHandler(async (req, res) => {
+  const { items, meta } = await db.listMarketplaceEvents(req.query)
+  return sendSuccess(res, items, 'Daftar event marketplace.', 200, meta)
+}))
 
-router.get('/marketplace/events', (req, res) => {
-  const { q, category, format, sort = 'upcoming', page = 1, limit = 12 } = req.query
-  let list = getPublicEvents()
+router.get('/marketplace/featured', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listFeaturedMarketplaceEvents())
+}))
 
-  if (q) {
-    const term = String(q).toLowerCase()
-    list = list.filter(
-      (e) =>
-        e.title.toLowerCase().includes(term) ||
-        (e.location_name || '').toLowerCase().includes(term)
-    )
-  }
-  if (category) list = list.filter((e) => e.category === category)
-  if (format) list = list.filter((e) => e.location_type === format)
-  if (sort === 'upcoming') {
-    list = [...list].sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
-  }
+router.get('/marketplace/search', asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.searchMarketplaceEvents(req.query.q))
+}))
 
-  const p = Number(page)
-  const l = Number(limit)
-  const paginated = list.slice((p - 1) * l, p * l).map((evt) => ({
-    ...evt,
-    organization: store.organizations.find((o) => o.id === evt.organization_id),
-    ticket_types: store.ticketTypes.filter((t) => t.event_id === evt.id)
-  }))
+router.get('/marketplace/categories', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listActiveCategories())
+}))
 
-  return sendSuccess(res, paginated, 'Daftar event marketplace.', 200, {
-    page: p,
-    limit: l,
-    total: list.length
-  })
-})
+router.get('/marketplace/organizers', asyncHandler(async (_req, res) => {
+  return sendSuccess(res, await db.listMarketplaceOrganizers())
+}))
 
-router.get('/marketplace/featured', (_req, res) => {
-  const featured = getPublicEvents()
-    .filter((e) => e.is_featured)
-    .map((evt) => ({
-      ...evt,
-      organization: store.organizations.find((o) => o.id === evt.organization_id),
-      ticket_types: store.ticketTypes.filter((t) => t.event_id === evt.id)
-    }))
-  return sendSuccess(res, featured)
-})
+router.get('/marketplace/events/:slug', asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.getPublicEventBySlugOrId(req.params.slug))
+}))
 
-router.get('/marketplace/search', (req, res) => {
-  const q = String(req.query.q || '').toLowerCase()
-  const list = getPublicEvents().filter((e) => e.title.toLowerCase().includes(q))
-  return sendSuccess(res, list)
-})
+router.get('/marketplace/organizers/:slug', asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.getPublicOrganizerBySlug(req.params.slug))
+}))
 
-router.get('/marketplace/categories', (_req, res) => {
-  return sendSuccess(res, store.categories.filter((c) => c.is_active))
-})
-
-router.get('/marketplace/organizers', (_req, res) => {
-  const orgs = store.organizations.map((org) => ({
-    ...org,
-    event_count: getPublicEvents().filter((e) => e.organization_id === org.id).length
-  }))
-  return sendSuccess(res, orgs)
-})
-
-router.get('/marketplace/events/:slug', (req, res) => {
-  const evt = getPublicEvents().find((e) => e.slug === req.params.slug || e.id === req.params.slug)
-  if (!evt) throw new AppError('Event tidak ditemukan di marketplace.', 404, 'EVENT_NOT_FOUND')
-
-  const organization = store.organizations.find((o) => o.id === evt.organization_id)
-  const ticket_types = store.ticketTypes.filter((t) => t.event_id === evt.id && t.status !== 'Disabled')
-  const schedules = store.schedules.filter((s) => s.event_id === evt.id && s.visibility === 'public')
-
-  return sendSuccess(res, { ...evt, organization, ticket_types, schedules })
-})
-
-router.get('/marketplace/organizers/:slug', (req, res) => {
-  const org = store.organizations.find((o) => o.slug === req.params.slug)
-  if (!org) throw new AppError('Organizer tidak ditemukan.', 404, 'ORG_NOT_FOUND')
-
-  const events = getPublicEvents().filter((e) => e.organization_id === org.id)
-  return sendSuccess(res, { ...org, events })
-})
-
-router.post('/marketplace/events/:id/report', optionalAuth, validateBody(reportCreateSchema), (req, res) => {
-  const evt = store.getEvent(req.params.id)
-  const report = {
-    id: 'rep-' + Date.now(),
-    event_id: evt.id,
-    reporter_id: req.user?.id || null,
-    ...req.validatedBody,
-    status: 'open',
-    created_at: new Date().toISOString()
-  }
-  store.reports.unshift(report)
+router.post('/marketplace/events/:id/report', optionalAuth, validateBody(reportCreateSchema), asyncHandler(async (req, res) => {
+  const report = await db.createEventReport(req.params.id, req.user?.id, req.validatedBody)
   return sendSuccess(res, report, 'Laporan telah diterima dan akan ditinjau oleh Admin.', 201)
-})
+}))
+
+// ---------------- FORUM TEMAN BERANGKAT EVENT ----------------
+router.get('/marketplace/events/:slug/companions', asyncHandler(async (req, res) => {
+  return sendSuccess(res, await db.listEventCompanionPosts(req.params.slug))
+}))
+
+router.post(
+  '/marketplace/events/:slug/companions',
+  requireAuth,
+  validateBody(companionPostCreateSchema),
+  asyncHandler(async (req, res) => {
+    const created = await db.createEventCompanionPost(req.params.slug, req.user, req.validatedBody)
+    return sendSuccess(res, created, 'Ajakan berangkat bareng berhasil diposting ke forum.', 201)
+  })
+)
+
+router.patch(
+  '/marketplace/companions/:postId',
+  requireAuth,
+  validateBody(companionPostUpdateSchema),
+  asyncHandler(async (req, res) => {
+    const updated = await db.updateEventCompanionPost(req.params.postId, req.user, req.validatedBody)
+    return sendSuccess(res, updated, 'Postingan forum berhasil diperbarui.')
+  })
+)
+
+router.delete(
+  '/marketplace/companions/:postId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const result = await db.deleteEventCompanionPost(req.params.postId, req.user)
+    return sendSuccess(res, result, 'Postingan forum dihapus.')
+  })
+)
+
+router.post(
+  '/marketplace/companions/:postId/replies',
+  requireAuth,
+  validateBody(companionReplyCreateSchema),
+  asyncHandler(async (req, res) => {
+    const updatedPost = await db.createEventCompanionReply(req.params.postId, req.user, req.validatedBody)
+    return sendSuccess(res, updatedPost, 'Balasan berhasil dikirim ke forum.', 201)
+  })
+)
 
 export default router
