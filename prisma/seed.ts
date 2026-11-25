@@ -1,15 +1,62 @@
 import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import { store } from '../src/repositories/store.js'
+import { hashPassword } from '../src/utils/crypto.js'
+import { supabaseAdmin, isSupabaseEnabled } from '../src/config/supabase.js'
 import { seedDemafestPlan } from './seed-demafest.js'
 
 const prisma = new PrismaClient()
+
+const SEED_PASSWORDS: Record<string, string> = {
+  'admin@terra.id': 'AdminTerra2026!',
+  'organizer@nusantaratech.id': 'OrganizerTerra2026!',
+  'peserta@terra.id': 'PesertaTerra2026!'
+}
 
 async function main() {
   console.log('Seeding TERRA PostgreSQL database via Prisma...')
   store.reset()
 
+  let supabaseUsers: any[] = []
+  if (isSupabaseEnabled && supabaseAdmin) {
+    const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }).catch(() => ({ data: null }))
+    supabaseUsers = listed?.users || []
+  }
+
   for (const user of store.users) {
+    const seedPassword = SEED_PASSWORDS[user.email] || 'Terra2026!'
+    const pwHash = hashPassword(seedPassword)
+
+    if (isSupabaseEnabled && supabaseAdmin) {
+      const existingAuth = supabaseUsers.find(
+        (u) => String(u.email || '').toLowerCase() === String(user.email).toLowerCase()
+      )
+      if (existingAuth) {
+        await supabaseAdmin.auth.admin
+          .updateUserById(existingAuth.id, {
+            password: seedPassword,
+            email_confirm: true,
+            user_metadata: {
+              full_name: user.full_name,
+              role: user.role
+            }
+          })
+          .catch(() => {})
+      } else {
+        await supabaseAdmin.auth.admin
+          .createUser({
+            email: user.email,
+            password: seedPassword,
+            email_confirm: true,
+            user_metadata: {
+              full_name: user.full_name,
+              role: user.role
+            }
+          })
+          .catch(() => {})
+      }
+    }
+
     const delegate: any =
       user.role === 'admin'
         ? prisma.admin
@@ -18,12 +65,14 @@ async function main() {
           : prisma.customer
 
     await delegate.upsert({
-      where: { id: user.id },
+      where: { email: user.email },
       update: {
         full_name: user.full_name,
         username: user.username || null,
         phone: user.phone || null,
         bio: user.bio || null,
+        password_hash: pwHash,
+        email_verified: true,
         is_suspended: Boolean(user.is_suspended)
       },
       create: {
@@ -33,12 +82,13 @@ async function main() {
         email: user.email,
         phone: user.phone || null,
         bio: user.bio || null,
+        password_hash: pwHash,
         provider: user.provider || 'email',
         email_verified: true,
         is_suspended: Boolean(user.is_suspended),
         ...(user.role === 'organizer'
           ? {
-              subscription_plan: user.subscription_plan || 'pro_monthly',
+              subscription_plan: user.subscription_plan || 'monthly_50k',
               subscription_status: user.subscription_status || 'active',
               subscription_expires_at: user.subscription_expires_at
                 ? new Date(user.subscription_expires_at)

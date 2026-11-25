@@ -104,11 +104,12 @@ router.post('/auth/login', validateBody(loginSchema), asyncHandler(async (req, r
 
     if (error) {
       const msg = (error.message || '').toLowerCase()
-      const existingUnverified = await db.findUserByEmail(email)
+      const existingLocal =
+        (await db.findUserByEmail(email, portal_role)) || (await db.findUserByEmail(email))
       if (
         (msg.includes('not confirmed') || msg.includes('confirm')) &&
-        existingUnverified &&
-        existingUnverified.email_verified === false
+        existingLocal &&
+        existingLocal.email_verified === false
       ) {
         throw new AppError(
           'Email Anda belum diverifikasi. Masukkan kode OTP dari email atau ubah alamat email.',
@@ -117,12 +118,51 @@ router.post('/auth/login', validateBody(loginSchema), asyncHandler(async (req, r
           [
             {
               requires_otp: true,
-              email: existingUnverified.email,
-              otp_session_token: signOtpSessionToken(existingUnverified)
+              email: existingLocal.email,
+              otp_session_token: signOtpSessionToken(existingLocal)
             }
           ]
         )
       }
+
+      // Allow verified Prisma accounts with valid password_hash (e.g. seeded Super Admin) to authenticate cleanly
+      if (existingLocal && existingLocal.password_hash && verifyPassword(password, existingLocal.password_hash)) {
+        if (existingLocal.is_suspended) {
+          throw new AppError('Akun Anda sedang ditangguhkan oleh Administrator.', 403, 'ACCOUNT_SUSPENDED')
+        }
+        if (existingLocal.email_verified === false) {
+          throw new AppError(
+            'Email Anda belum diverifikasi. Masukkan kode OTP terlebih dahulu.',
+            403,
+            'EMAIL_NOT_VERIFIED',
+            [
+              {
+                requires_otp: true,
+                email: existingLocal.email,
+                otp_session_token: signOtpSessionToken(existingLocal)
+              }
+            ]
+          )
+        }
+        if (portal_role === 'admin' && existingLocal.role !== 'admin') {
+          throw new AppError('Akun ini tidak memiliki akses Platform Administrator.', 403, 'FORBIDDEN_PORTAL')
+        }
+        if (portal_role === 'organizer' && existingLocal.role !== 'organizer') {
+          throw new AppError('Akun ini bukan akun Organizer. Silakan masuk melalui Login Peserta.', 403, 'FORBIDDEN_PORTAL')
+        }
+        const token = signOAuthToken(existingLocal)
+        return sendSuccess(
+          res,
+          {
+            user: sanitizeUser(existingLocal),
+            access_token: token,
+            refresh_token: null,
+            mode: 'prisma-jwt'
+          },
+          'Login berhasil.'
+        )
+      }
+
       throw new AppError(error.message || 'Email atau kata sandi salah.', 401, 'INVALID_CREDENTIALS')
     }
 
