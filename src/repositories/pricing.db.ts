@@ -1127,19 +1127,25 @@ export async function adminCreatePromo(payload) {
 export async function findBillingTransactionByIdOrInvoice(identifier: string) {
   const clean = String(identifier || '').trim()
   if (!clean) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
+  const baseRef = clean.replace(/-R[A-Z0-9]+$/i, '')
   if (!usePrisma()) {
     const tx = store.billingTransactions.find(
       (t) =>
         t.id === clean ||
         t.invoice_number === clean ||
+        t.invoice_number === baseRef ||
         t.payment_metadata?.midtrans_order_id === clean
     )
     if (!tx) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
     return tx
   }
+  const orFilters: any[] = [{ id: clean }, { invoice_number: clean }]
+  if (baseRef && baseRef !== clean) {
+    orFilters.push({ invoice_number: baseRef })
+  }
   const tx = await prisma.billingTransaction.findFirst({
     where: {
-      OR: [{ id: clean }, { invoice_number: clean }]
+      OR: orFilters
     },
     include: {
       organization: { select: { id: true, name: true, email: true, phone: true } },

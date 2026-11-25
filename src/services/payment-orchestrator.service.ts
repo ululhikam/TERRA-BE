@@ -371,6 +371,13 @@ export async function processMidtransWebhook(payload: Record<string, any>) {
   const baseRef = extractBaseOrderReference(midtransOrderId)
   const state = mapMidtransTransactionState(payload)
   const incomingAmount = Math.round(Number(payload.gross_amount || 0))
+  console.info('[Midtrans Webhook]', {
+    order_id: midtransOrderId,
+    baseRef,
+    transaction_status: payload.transaction_status,
+    state,
+    incomingAmount
+  })
 
   // Route to BillingTransaction for INV-* invoices or Order for ORD-* / others
   if (baseRef.toUpperCase().startsWith('INV-')) {

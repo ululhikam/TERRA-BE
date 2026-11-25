@@ -2164,19 +2164,25 @@ export async function verifyOrderPayment(eventId, orderId, operatorUser) {
 export async function findOrderByOrderNumber(reference: string) {
   const clean = String(reference || '').trim()
   if (!clean) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+  const baseRef = clean.replace(/-R[A-Z0-9]+$/i, '')
   if (!usePrisma()) {
     const ord = store.orders.find(
       (o) =>
         o.order_number === clean ||
+        o.order_number === baseRef ||
         o.id === clean ||
         o.payment_metadata?.midtrans_order_id === clean
     )
     if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
     return ord
   }
+  const orFilters: any[] = [{ order_number: clean }, { id: clean }]
+  if (baseRef && baseRef !== clean) {
+    orFilters.push({ order_number: baseRef })
+  }
   const ord = await prisma.order.findFirst({
     where: {
-      OR: [{ order_number: clean }, { id: clean }]
+      OR: orFilters
     }
   })
   if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
