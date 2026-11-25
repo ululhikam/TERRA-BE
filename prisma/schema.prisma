@@ -373,14 +373,22 @@ model Order {
   subtotal       Float    @default(0)
   total          Float    @default(0)
   currency       String   @default("IDR")
-  order_status      String    @default("Confirmed")
-  payment_status    String    @default("Paid")
-  payment_proof_url String?
-  payment_notes     String?
-  verified_by       String?
-  verified_at       DateTime?
-  created_at        DateTime  @default(now())
-  updated_at     DateTime @updatedAt
+  order_status         String    @default("Confirmed")
+  payment_status       String    @default("Paid")
+  payment_method       String    @default("midtrans_snap")
+  payment_provider     String?
+  payment_token        String?
+  payment_redirect_url String?
+  payment_reference    String?
+  payment_expires_at   DateTime?
+  paid_at              DateTime?
+  payment_metadata     Json      @default("{}")
+  payment_proof_url    String?
+  payment_notes        String?
+  verified_by          String?
+  verified_at          DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
   event        Event         @relation(fields: [event_id], references: [id], onDelete: Cascade)
   customer     Customer?     @relation(fields: [customer_id], references: [id], onDelete: SetNull)
@@ -390,6 +398,7 @@ model Order {
 
   @@index([event_id])
   @@index([customer_id])
+  @@index([payment_reference])
   @@map("orders")
 }
 
@@ -840,21 +849,27 @@ model BillingTransaction {
   bundle_id           String?
   promo_code          String?
   community_org_proof String?
-  payment_method      String    @default("manual_whatsapp")
-  base_price_idr      Int       @default(0)
-  discount_idr        Int       @default(0)
-  upgrade_credit_idr  Int       @default(0)
-  final_amount_idr    Int       @default(0)
-  plan_snapshot       Json      @default("{}")
-  payment_proof_url   String?
-  payment_notes       String?
-  admin_notes         String?
-  verified_by         String?
-  verified_at         DateTime?
-  status              String    @default("Pending")
-  expires_at          DateTime?
-  created_at          DateTime  @default(now())
-  updated_at          DateTime  @updatedAt
+  payment_method       String    @default("payment_gateway")
+  payment_provider     String?
+  payment_token        String?
+  payment_redirect_url String?
+  payment_reference    String?
+  paid_at              DateTime?
+  payment_metadata     Json      @default("{}")
+  base_price_idr       Int       @default(0)
+  discount_idr         Int       @default(0)
+  upgrade_credit_idr   Int       @default(0)
+  final_amount_idr     Int       @default(0)
+  plan_snapshot        Json      @default("{}")
+  payment_proof_url    String?
+  payment_notes        String?
+  admin_notes          String?
+  verified_by          String?
+  verified_at          DateTime?
+  status               String    @default("Pending")
+  expires_at           DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
   organization Organization @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   event        Event?       @relation(fields: [event_id], references: [id], onDelete: SetNull)
@@ -863,6 +878,7 @@ model BillingTransaction {
   @@index([organizer_id])
   @@index([event_id])
   @@index([status])
+  @@index([payment_reference])
   @@map("billing_transactions")
 }
 

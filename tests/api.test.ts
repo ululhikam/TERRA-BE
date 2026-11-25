@@ -7,13 +7,17 @@ process.env.NODE_ENV = 'test'
 process.env.DATABASE_URL = ''
 process.env.DIRECT_URL = ''
 process.env.RESEND_API_KEY = ''
+process.env.MIDTRANS_SERVER_KEY = ''
+process.env.MIDTRANS_CLIENT_KEY = ''
 
 const { default: app } = await import('../src/app.js')
+const { env } = await import('../src/config/env.js')
 const { store } = await import('../src/repositories/store.js')
 const { signOAuthToken } = await import('../src/config/passport.js')
 const { buildTicketQrEmailHtml, mapResendAttachments } = await import('../src/services/email.service.js')
 const { generateBrandedQrBuffer } = await import('../src/utils/qrcode.js')
 const { generateTicketsQrPdfBuffer } = await import('../src/services/pdf.service.js')
+const { computeMidtransSignature } = await import('../src/services/payment.service.js')
 
 let server
 let baseUrl
@@ -942,5 +946,243 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     })
     assert.equal(pdfBuf.subarray(0, 5).toString('utf8'), '%PDF-')
     assert.ok(pdfBuf.length > 5000)
+  })
+
+  it('processes Midtrans webhooks with strict SHA-512 signature, amount validation, idempotent settlement & expiry quota restore', async () => {
+    const prevServerKey = env.midtransServerKey
+    const prevClientKey = env.midtransClientKey
+    env.midtransServerKey = 'SB-Mid-server-TERRA-TEST-SECRET'
+    env.midtransClientKey = 'SB-Mid-client-TERRA-TEST-CLIENT'
+
+    // Stub global fetch only during Snap API call, leaving local test server requests untouched
+    const originalFetch = globalThis.fetch
+    let snapCallCount = 0
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input?.url || ''
+      if (url.includes('midtrans.com/snap/v1/transactions')) {
+        snapCallCount += 1
+        return new Response(
+          JSON.stringify({
+            token: `snap-tok-${snapCallCount}`,
+            redirect_url: `https://app.sandbox.midtrans.com/snap/v4/redirection/snap-tok-${snapCallCount}`
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      return originalFetch(input, init)
+    }) as any
+
+    try {
+      // 1. Public config endpoint exposes client_key & snap_js_url, NEVER server_key
+      const cfgRes = await request('/payments/config')
+      assert.equal(cfgRes.status, 200)
+      assert.equal(cfgRes.data.data.configured, true)
+      assert.equal(cfgRes.data.data.client_key, 'SB-Mid-client-TERRA-TEST-CLIENT')
+      assert.equal((cfgRes.data.data as any).server_key, undefined)
+      assert.ok(!JSON.stringify(cfgRes.data).includes('SB-Mid-server-TERRA-TEST-SECRET'))
+
+      // 2. Paid ticket checkout automatically provisions Midtrans Snap token
+      const paidOrderRes = await request('/orders', {
+        method: 'POST',
+        token: 'demo-token-customer',
+        body: {
+          event_id: 'evt-1',
+          ticket_type_id: 'tkt-vip-1',
+          quantity: 1,
+          attendee: {
+            full_name: 'Raka Midtrans VIP',
+            email: 'raka.midtrans@example.com',
+            phone: '081288887777'
+          }
+        }
+      })
+      assert.equal(paidOrderRes.status, 201)
+      assert.equal(paidOrderRes.data.data.order.order_status, 'Pending')
+      assert.equal(paidOrderRes.data.data.payment.snap_token, 'snap-tok-1')
+      const orderNumber = paidOrderRes.data.data.order.order_number
+      const grossStr = `${Number(paidOrderRes.data.data.order.total)}.00`
+      const outboxBefore = store.emailOutbox.length
+      const incomesBefore = store.incomes.length
+
+      // 3. Reject invalid webhook signature
+      const badSigRes = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: orderNumber,
+          status_code: '200',
+          gross_amount: grossStr,
+          transaction_status: 'settlement',
+          signature_key: 'invalid-signature'
+        }
+      })
+      assert.equal(badSigRes.status, 401)
+      assert.equal(badSigRes.data.error.code, 'INVALID_WEBHOOK_SIGNATURE')
+
+      // 4. Reject tampered gross_amount even with matching hash format (wrong amount)
+      const wrongAmt = '1000.00'
+      const wrongAmtSig = computeMidtransSignature({
+        orderId: orderNumber,
+        statusCode: '200',
+        grossAmount: wrongAmt,
+        serverKey: env.midtransServerKey
+      })
+      const badAmtRes = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: orderNumber,
+          status_code: '200',
+          gross_amount: wrongAmt,
+          transaction_status: 'settlement',
+          signature_key: wrongAmtSig
+        }
+      })
+      assert.equal(badAmtRes.status, 400)
+      assert.equal(badAmtRes.data.error.code, 'AMOUNT_MISMATCH')
+
+      // 5. Valid settlement webhook activates order, QR tickets, FinanceIncome & dispatches email
+      const validSig = computeMidtransSignature({
+        orderId: orderNumber,
+        statusCode: '200',
+        grossAmount: grossStr,
+        serverKey: env.midtransServerKey
+      })
+      const settleRes = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: orderNumber,
+          status_code: '200',
+          gross_amount: grossStr,
+          transaction_status: 'settlement',
+          payment_type: 'qris',
+          transaction_id: 'mid-tx-order-1',
+          signature_key: validSig
+        }
+      })
+      assert.equal(settleRes.status, 200)
+      assert.equal(settleRes.data.data.payment_state, 'settled')
+      assert.equal(settleRes.data.data.already_settled, false)
+      assert.equal(settleRes.data.data.order_status, 'Confirmed')
+      assert.equal(store.emailOutbox.length, outboxBefore + 1)
+      assert.equal(store.incomes.length, incomesBefore + 1)
+
+      // 6. Duplicate webhook replay is strictly idempotent (no duplicate income or email)
+      const replayRes = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: orderNumber,
+          status_code: '200',
+          gross_amount: grossStr,
+          transaction_status: 'settlement',
+          payment_type: 'qris',
+          transaction_id: 'mid-tx-order-1',
+          signature_key: validSig
+        }
+      })
+      assert.equal(replayRes.status, 200)
+      assert.equal(replayRes.data.data.already_settled, true)
+      assert.equal(store.emailOutbox.length, outboxBefore + 1)
+      assert.equal(store.incomes.length, incomesBefore + 1)
+
+      // 7. Expire webhook cancels Pending order and restores ticket sold_quantity quota
+      const vipBefore = store.ticketTypes.find((t) => t.id === 'tkt-vip-1').sold_quantity
+      const expOrderRes = await request('/orders', {
+        method: 'POST',
+        token: 'demo-token-customer',
+        body: {
+          event_id: 'evt-1',
+          ticket_type_id: 'tkt-vip-1',
+          quantity: 2,
+          attendee: { full_name: 'Expire Test', email: 'expire@example.com', phone: '081299990000' }
+        }
+      })
+      assert.equal(expOrderRes.status, 201)
+      assert.equal(store.ticketTypes.find((t) => t.id === 'tkt-vip-1').sold_quantity, vipBefore + 2)
+      const expOrderNum = expOrderRes.data.data.order.order_number
+      const expGrossStr = `${Number(expOrderRes.data.data.order.total)}.00`
+      const expSig = computeMidtransSignature({
+        orderId: expOrderNum,
+        statusCode: '202',
+        grossAmount: expGrossStr,
+        serverKey: env.midtransServerKey
+      })
+      const expWebhook = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: expOrderNum,
+          status_code: '202',
+          gross_amount: expGrossStr,
+          transaction_status: 'expire',
+          transaction_id: 'mid-tx-exp-1',
+          signature_key: expSig
+        }
+      })
+      assert.equal(expWebhook.status, 200)
+      assert.equal(expWebhook.data.data.order_status, 'Cancelled')
+      assert.equal(store.ticketTypes.find((t) => t.id === 'tkt-vip-1').sold_quantity, vipBefore)
+
+      // 8. Organizer billing checkout + Midtrans settlement webhook auto-unlocks Pro event modules
+      const freeEventRes = await request('/events', {
+        method: 'POST',
+        token: 'demo-token-organizer',
+        body: {
+          organization_id: 'org-1',
+          title: 'Midtrans Billing Test Event',
+          start_at: '2026-10-10',
+          end_at: '2026-10-11'
+        }
+      })
+      assert.equal(freeEventRes.status, 201)
+      const targetEventId = freeEventRes.data.data.id
+
+      const billingCheckout = await request('/billing/checkout', {
+        method: 'POST',
+        token: 'demo-token-organizer',
+        body: {
+          organization_id: 'org-1',
+          event_id: targetEventId,
+          plan_code: 'pro',
+          promo_code: 'EARLY100',
+          payment_method: 'payment_gateway'
+        }
+      })
+      assert.equal(billingCheckout.status, 201)
+      const tx = billingCheckout.data.data.transaction
+      assert.equal(tx.status, 'Pending')
+      assert.ok(billingCheckout.data.data.payment.snap_token)
+
+      const invGrossStr = `${Number(tx.final_amount_idr)}.00`
+      const invSig = computeMidtransSignature({
+        orderId: tx.invoice_number,
+        statusCode: '200',
+        grossAmount: invGrossStr,
+        serverKey: env.midtransServerKey
+      })
+      const invSettle = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: tx.invoice_number,
+          status_code: '200',
+          gross_amount: invGrossStr,
+          transaction_status: 'settlement',
+          payment_type: 'bank_transfer',
+          transaction_id: 'mid-tx-inv-1',
+          signature_key: invSig
+        }
+      })
+      assert.equal(invSettle.status, 200)
+      assert.equal(invSettle.data.data.target_type, 'billing_transaction')
+      assert.equal(invSettle.data.data.status, 'Paid')
+
+      const unlockRes = await request(`/events/${targetEventId}/modules/finance`, {
+        method: 'PATCH',
+        token: 'demo-token-organizer',
+        body: { is_enabled: true }
+      })
+      assert.equal(unlockRes.status, 200)
+    } finally {
+      globalThis.fetch = originalFetch
+      env.midtransServerKey = prevServerKey
+      env.midtransClientKey = prevClientKey
+    }
   })
 })

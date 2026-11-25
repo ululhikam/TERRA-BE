@@ -11,6 +11,11 @@ import {
 } from '../utils/qrcode.js'
 import { generateTicketsQrPdfBuffer } from './pdf.service.js'
 import { sendTicketOrderEmail } from './email.service.js'
+import {
+  createMidtransSnapTransaction,
+  getPaymentConfigStatus,
+  isMidtransConfigured
+} from './payment.service.js'
 
 export async function assertOrderOrEventAccess(user, { customer_id = null, event_id = null }) {
   if (!user) throw new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED')
@@ -47,11 +52,61 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   const evt = await db.getEventOrThrow(event_id)
   const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t, evt)))
 
+  let payment: any = {
+    ...getPaymentConfigStatus(),
+    required: Number(result.order?.total || 0) > 0 && result.order?.order_status === 'Pending',
+    snap_token: null,
+    redirect_url: null,
+    midtrans_order_id: result.order?.order_number || null
+  }
+
+  if (payment.required && isMidtransConfigured()) {
+    const snap = await createMidtransSnapTransaction({
+      midtransOrderId: result.order.order_number,
+      grossAmount: Number(result.order.total),
+      itemDetails: [
+        {
+          id: String(ticket_type_id).slice(0, 50),
+          price: Math.round(Number(result.order.total) / Math.max(1, Number(quantity || 1))),
+          quantity: Math.max(1, Number(quantity || 1)),
+          name: `${evt?.title || 'TERRA Event'} - ${result.participant?.ticket_type || 'Tiket'}`.slice(0, 50)
+        }
+      ],
+      customerDetails: {
+        first_name: attendee?.full_name || user.full_name,
+        email: attendee?.email || user.email,
+        phone: attendee?.phone || user.phone || undefined
+      },
+      finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || evt?.id || event_id)}?order_id=${encodeURIComponent(result.order.order_number)}`,
+      expiryMinutes: 1440
+    })
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    await db.updateOrderPaymentSession(result.order.id, {
+      payment_provider: 'midtrans',
+      payment_method: 'midtrans_snap',
+      payment_token: snap.token,
+      payment_redirect_url: snap.redirect_url,
+      payment_expires_at: expiresAt,
+      payment_metadata: { midtrans_order_id: snap.midtrans_order_id }
+    })
+
+    result.order.payment_token = snap.token
+    result.order.payment_redirect_url = snap.redirect_url
+    payment = {
+      ...payment,
+      snap_token: snap.token,
+      redirect_url: snap.redirect_url,
+      midtrans_order_id: snap.midtrans_order_id,
+      expires_at: expiresAt.toISOString()
+    }
+  }
+
   let emailStatus: any = {
     sent: false,
     delivered_by_provider: false,
     mode: 'deferred-pending-payment',
-    reason: 'Menunggu verifikasi pembayaran oleh penyelenggara sebelum e-tiket QR diterbitkan.'
+    reason: 'Menunggu penyelesaian pembayaran melalui Midtrans sebelum e-tiket QR diterbitkan.'
   }
 
   if (result.order?.order_status === 'Confirmed') {
@@ -71,20 +126,22 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   return {
     ...result,
     tickets: ticketsWithQr,
+    payment,
     email_status: emailStatus,
     email_notification: emailStatus
   }
 }
 
-export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
-  const result = await db.verifyOrderPayment(eventId, orderId, operatorUser)
-  const evt = await db.getEventOrThrow(eventId)
-  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t, evt)))
+export async function dispatchSettledOrderEmailAndQr(settledResult: any, fallbackUser: any = null) {
+  const order = settledResult?.order
+  if (!order) return { ...settledResult, email_status: null }
+  const evt = await db.getEventOrThrow(order.event_id).catch(() => null)
+  const ticketsWithQr = await Promise.all((settledResult.tickets || []).map((t) => attachTicketQr(t, evt)))
 
-  const recipientEmail = result.participant?.email || operatorUser?.email
-  const customerName = result.participant?.full_name || 'Peserta TERRA'
+  const recipientEmail = settledResult.participant?.email || fallbackUser?.email
+  const customerName = settledResult.participant?.full_name || fallbackUser?.full_name || 'Peserta TERRA'
   let emailStatus = null
-  if (recipientEmail) {
+  if (recipientEmail && !settledResult.alreadySettled) {
     emailStatus = await sendTicketOrderEmail({
       to: recipientEmail,
       customerName,
@@ -92,17 +149,22 @@ export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
       eventDate: evt?.start_at || evt?.start_date || '-',
       location: evt?.location_name || evt?.venue_name || '-',
       event: evt,
-      orderId: result.order?.id,
-      orderNumber: result.order?.order_number,
+      orderId: order.id,
+      orderNumber: order.order_number,
       tickets: ticketsWithQr
     })
   }
 
   return {
-    ...result,
+    ...settledResult,
     tickets: ticketsWithQr,
     email_status: emailStatus
   }
+}
+
+export async function verifyOrderAndSendEmail(eventId, orderId, operatorUser) {
+  const result = await db.verifyOrderPayment(eventId, orderId, operatorUser)
+  return dispatchSettledOrderEmailAndQr(result, operatorUser)
 }
 
 async function loadEventMapForTickets(tickets: any[] = []) {

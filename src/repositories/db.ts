@@ -1949,6 +1949,8 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
         currency: tkt.currency,
         order_status: orderStatus,
         payment_status: paymentStatus,
+        payment_method: isFree ? 'free' : 'midtrans_snap',
+        payment_provider: isFree ? null : 'midtrans',
         items: {
           create: {
             ticket_type_id,
@@ -2144,6 +2146,311 @@ export async function verifyOrderPayment(eventId, orderId, operatorUser) {
     entity_id: result.order.id
   })
   return result
+}
+
+export async function findOrderByOrderNumber(reference: string) {
+  const clean = String(reference || '').trim()
+  if (!clean) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+  if (!usePrisma()) {
+    const ord = store.orders.find(
+      (o) =>
+        o.order_number === clean ||
+        o.id === clean ||
+        o.payment_metadata?.midtrans_order_id === clean
+    )
+    if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+    return ord
+  }
+  const ord = await prisma.order.findFirst({
+    where: {
+      OR: [{ order_number: clean }, { id: clean }]
+    }
+  })
+  if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+  return ord
+}
+
+export async function updateOrderPaymentSession(orderId: string, patch: Record<string, any>) {
+  if (!usePrisma()) {
+    const ord = store.orders.find((o) => o.id === orderId)
+    if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+    Object.assign(ord, {
+      ...(patch.payment_provider !== undefined ? { payment_provider: patch.payment_provider } : {}),
+      ...(patch.payment_method !== undefined ? { payment_method: patch.payment_method } : {}),
+      ...(patch.payment_token !== undefined ? { payment_token: patch.payment_token } : {}),
+      ...(patch.payment_redirect_url !== undefined ? { payment_redirect_url: patch.payment_redirect_url } : {}),
+      ...(patch.payment_reference !== undefined ? { payment_reference: patch.payment_reference } : {}),
+      ...(patch.payment_expires_at !== undefined ? { payment_expires_at: patch.payment_expires_at } : {}),
+      ...(patch.payment_metadata !== undefined
+        ? { payment_metadata: { ...(ord.payment_metadata || {}), ...patch.payment_metadata } }
+        : {})
+    })
+    return ord
+  }
+  const existing = await prisma.order.findUnique({ where: { id: orderId } })
+  if (!existing) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+  const mergedMeta =
+    patch.payment_metadata !== undefined
+      ? { ...((existing.payment_metadata as Record<string, any>) || {}), ...patch.payment_metadata }
+      : undefined
+  return prisma.order.update({
+    where: { id: orderId },
+    data: {
+      ...(patch.payment_provider !== undefined ? { payment_provider: patch.payment_provider } : {}),
+      ...(patch.payment_method !== undefined ? { payment_method: patch.payment_method } : {}),
+      ...(patch.payment_token !== undefined ? { payment_token: patch.payment_token } : {}),
+      ...(patch.payment_redirect_url !== undefined ? { payment_redirect_url: patch.payment_redirect_url } : {}),
+      ...(patch.payment_reference !== undefined ? { payment_reference: patch.payment_reference } : {}),
+      ...(patch.payment_expires_at !== undefined ? { payment_expires_at: patch.payment_expires_at } : {}),
+      ...(mergedMeta !== undefined ? { payment_metadata: mergedMeta } : {})
+    }
+  })
+}
+
+export async function settleOrderFromGateway(orderId: string, gatewayInfo: Record<string, any> = {}) {
+  const paidDateStr = new Date().toISOString().slice(0, 10)
+  if (!usePrisma()) {
+    const order = store.orders.find((o) => o.id === orderId)
+    if (!order) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+    const tickets = store.tickets.filter((tk) => tk.order_id === order.id)
+    const participant = store.participants.find((p) => p.order_id === order.id) || null
+    if (['Paid', 'Verified', 'Not Required'].includes(order.payment_status) || order.order_status === 'Confirmed') {
+      return { alreadySettled: true, cancelledConflict: false, order, participant, tickets }
+    }
+    if (order.order_status === 'Cancelled') {
+      return { alreadySettled: true, cancelledConflict: true, order, participant, tickets }
+    }
+
+    order.order_status = 'Confirmed'
+    order.payment_status = 'Paid'
+    order.payment_provider = gatewayInfo.provider || 'midtrans'
+    order.payment_method = gatewayInfo.payment_type || order.payment_method || 'midtrans_snap'
+    order.payment_reference = gatewayInfo.transaction_id || order.payment_reference || null
+    order.paid_at = new Date().toISOString()
+    order.verified_by = 'midtrans-gateway'
+    order.verified_at = order.paid_at
+    order.payment_metadata = { ...(order.payment_metadata || {}), ...(gatewayInfo.metadata || {}) }
+
+    tickets.forEach((tk) => {
+      if (tk.status === 'Pending') tk.status = 'Active'
+    })
+    if (participant && participant.registration_status === 'Pending') {
+      participant.registration_status = 'Confirmed'
+    }
+    if (Number(order.total || 0) > 0) {
+      store.incomes.unshift({
+        id: 'inc-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+        event_id: order.event_id,
+        category: 'Penjualan Tiket',
+        description: `Pembayaran Midtrans (${order.order_number})`,
+        amount: Number(order.total),
+        currency: order.currency || 'IDR',
+        date: paidDateStr
+      })
+    }
+    if (order.customer_id) {
+      await createNotification({
+        user_id: order.customer_id,
+        user_role: 'customer',
+        title: `Pembayaran Berhasil: ${order.order_number}`,
+        message: 'Pembayaran via Midtrans berhasil dikonfirmasi. E-Tiket QR kini aktif.',
+        type: 'success',
+        reference_type: 'order',
+        reference_id: order.id
+      })
+    }
+    await logActivity({
+      event_id: order.event_id,
+      user_id: order.customer_id || null,
+      action: 'ORDER_PAYMENT_GATEWAY_SETTLED',
+      entity_type: 'order',
+      entity_id: order.id,
+      metadata: { order_number: order.order_number, payment_reference: order.payment_reference }
+    })
+    return { alreadySettled: false, cancelledConflict: false, order, participant, tickets }
+  }
+
+  const result = await runTransaction(async (tx) => {
+    const lockedRows: any[] = await tx.$queryRaw`
+      SELECT id, order_number, event_id, customer_id, order_status, payment_status, total, currency, payment_metadata
+      FROM orders
+      WHERE id = ${orderId}
+      FOR UPDATE
+    `
+    const locked = lockedRows[0]
+    if (!locked) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+
+    if (['Paid', 'Verified', 'Not Required'].includes(locked.payment_status) || locked.order_status === 'Confirmed') {
+      const [order, participant, tickets] = await Promise.all([
+        tx.order.findUnique({ where: { id: orderId } }),
+        tx.participant.findFirst({ where: { order_id: orderId } }),
+        tx.ticket.findMany({ where: { order_id: orderId } })
+      ])
+      return { alreadySettled: true, cancelledConflict: false, order, participant, tickets }
+    }
+    if (locked.order_status === 'Cancelled') {
+      const order = await tx.order.findUnique({ where: { id: orderId } })
+      return { alreadySettled: true, cancelledConflict: true, order, participant: null, tickets: [] }
+    }
+
+    const now = new Date()
+    const mergedMeta = {
+      ...((locked.payment_metadata as Record<string, any>) || {}),
+      ...(gatewayInfo.metadata || {})
+    }
+    const updatedOrder = await tx.order.update({
+      where: { id: orderId },
+      data: {
+        order_status: 'Confirmed',
+        payment_status: 'Paid',
+        payment_provider: gatewayInfo.provider || 'midtrans',
+        payment_method: gatewayInfo.payment_type || 'midtrans_snap',
+        payment_reference: gatewayInfo.transaction_id || null,
+        paid_at: now,
+        verified_by: 'midtrans-gateway',
+        verified_at: now,
+        payment_metadata: mergedMeta
+      }
+    })
+    await tx.ticket.updateMany({
+      where: { order_id: orderId, status: 'Pending' },
+      data: { status: 'Active' }
+    })
+    await tx.participant.updateMany({
+      where: { order_id: orderId, registration_status: 'Pending' },
+      data: { registration_status: 'Confirmed' }
+    })
+
+    if (Number(locked.total || 0) > 0) {
+      await tx.financeIncome.create({
+        data: {
+          event_id: locked.event_id,
+          category: 'Penjualan Tiket',
+          description: `Pembayaran Midtrans (${locked.order_number})`,
+          amount: Number(locked.total),
+          currency: locked.currency || 'IDR',
+          date: paidDateStr,
+          created_by: 'midtrans-gateway'
+        }
+      })
+    }
+
+    const [participant, tickets] = await Promise.all([
+      tx.participant.findFirst({ where: { order_id: orderId } }),
+      tx.ticket.findMany({ where: { order_id: orderId } })
+    ])
+    return { alreadySettled: false, cancelledConflict: false, order: updatedOrder, participant, tickets }
+  })
+
+  if (!result.alreadySettled && !result.cancelledConflict && result.order) {
+    if (result.order.customer_id) {
+      await createNotification({
+        user_id: result.order.customer_id,
+        user_role: 'customer',
+        title: `Pembayaran Berhasil: ${result.order.order_number}`,
+        message: 'Pembayaran via Midtrans berhasil dikonfirmasi. E-Tiket QR kini aktif.',
+        type: 'success',
+        reference_type: 'order',
+        reference_id: result.order.id
+      })
+    }
+    await logActivity({
+      event_id: result.order.event_id,
+      user_id: result.order.customer_id || null,
+      action: 'ORDER_PAYMENT_GATEWAY_SETTLED',
+      entity_type: 'order',
+      entity_id: result.order.id,
+      metadata: { order_number: result.order.order_number, payment_reference: result.order.payment_reference }
+    })
+  }
+  return result
+}
+
+export async function expireOrCancelOrderFromGateway(
+  orderId: string,
+  reasonState: 'expired' | 'cancelled' | 'denied' | 'refunded' = 'expired',
+  gatewayInfo: Record<string, any> = {}
+) {
+  const mappedPaymentStatus =
+    reasonState === 'expired'
+      ? 'Expired'
+      : reasonState === 'denied'
+        ? 'Denied'
+        : reasonState === 'refunded'
+          ? 'Refunded'
+          : 'Cancelled'
+
+  if (!usePrisma()) {
+    const order = store.orders.find((o) => o.id === orderId)
+    if (!order) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+    if (reasonState !== 'refunded' && (['Paid', 'Verified', 'Not Required'].includes(order.payment_status) || order.order_status === 'Confirmed')) {
+      return { updated: false, order }
+    }
+    if (order.order_status === 'Cancelled') {
+      return { updated: false, order }
+    }
+    if (order.ticket_type_id) {
+      const tkt = store.ticketTypes.find((t) => t.id === order.ticket_type_id)
+      if (tkt) {
+        tkt.sold_quantity = Math.max(0, Number(tkt.sold_quantity || 0) - Number(order.quantity || 0))
+        if (tkt.status === 'Sold Out' && tkt.sold_quantity < tkt.quantity) tkt.status = 'On Sale'
+      }
+    }
+    order.order_status = 'Cancelled'
+    order.payment_status = mappedPaymentStatus
+    order.payment_metadata = { ...(order.payment_metadata || {}), ...(gatewayInfo.metadata || {}) }
+    store.tickets.filter((tk) => tk.order_id === orderId).forEach((tk) => { tk.status = 'Cancelled' })
+    store.participants.filter((p) => p.order_id === orderId).forEach((p) => { p.registration_status = 'Cancelled' })
+    return { updated: true, order }
+  }
+
+  return runTransaction(async (tx) => {
+    const lockedRows: any[] = await tx.$queryRaw`
+      SELECT id, ticket_type_id, quantity, order_status, payment_status, payment_metadata
+      FROM orders
+      WHERE id = ${orderId}
+      FOR UPDATE
+    `
+    const locked = lockedRows[0]
+    if (!locked) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+    if (reasonState !== 'refunded' && (['Paid', 'Verified', 'Not Required'].includes(locked.payment_status) || locked.order_status === 'Confirmed')) {
+      const existing = await tx.order.findUnique({ where: { id: orderId } })
+      return { updated: false, order: existing }
+    }
+    if (locked.order_status === 'Cancelled') {
+      const existing = await tx.order.findUnique({ where: { id: orderId } })
+      return { updated: false, order: existing }
+    }
+
+    if (locked.ticket_type_id) {
+      const tkt = await tx.ticketType.findUnique({ where: { id: locked.ticket_type_id } })
+      if (tkt) {
+        const nextSold = Math.max(0, Number(tkt.sold_quantity || 0) - Number(locked.quantity || 0))
+        await tx.ticketType.update({
+          where: { id: tkt.id },
+          data: {
+            sold_quantity: nextSold,
+            ...(tkt.status === 'Sold Out' && nextSold < tkt.quantity ? { status: 'On Sale' } : {})
+          }
+        })
+      }
+    }
+
+    const updatedOrder = await tx.order.update({
+      where: { id: orderId },
+      data: {
+        order_status: 'Cancelled',
+        payment_status: mappedPaymentStatus,
+        payment_metadata: {
+          ...((locked.payment_metadata as Record<string, any>) || {}),
+          ...(gatewayInfo.metadata || {})
+        }
+      }
+    })
+    await tx.ticket.updateMany({ where: { order_id: orderId }, data: { status: 'Cancelled' } })
+    await tx.participant.updateMany({ where: { order_id: orderId }, data: { registration_status: 'Cancelled' } })
+    return { updated: true, order: updatedOrder }
+  })
 }
 
 export async function cancelOrder(orderId, userId, isAdminOrAuthorized = false) {

@@ -48,6 +48,10 @@ export interface EnvConfig {
   googleCallbackUrl: string
   oauthJwtSecret: string
   adminWhatsappNumber: string
+  midtransServerKey: string
+  midtransClientKey: string
+  midtransMerchantId: string
+  midtransIsProduction: boolean
 }
 
 export interface EventBranding {

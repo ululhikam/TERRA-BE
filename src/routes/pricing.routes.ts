@@ -4,6 +4,8 @@ import { requireEventPermission, requireOrganizerOrAdmin } from '../middleware/r
 import { validateBody } from '../middleware/validate.middleware.js'
 import { billingCheckoutSchema, billingPreviewSchema } from '../validators/schemas.js'
 import { uploadBufferToStorage, uploadSingleFile } from '../services/storage.service.js'
+import { createOrGetBillingSnapSession } from '../services/payment-orchestrator.service.js'
+import { getPaymentConfigStatus, isMidtransConfigured } from '../services/payment.service.js'
 import * as db from '../repositories/db.js'
 import * as pricingDb from '../repositories/pricing.db.js'
 import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
@@ -61,12 +63,33 @@ router.post('/billing/checkout', requireAuth, requireOrganizerOrAdmin, validateB
   }
   const result = await pricingDb.createBillingCheckout(req.user, req.validatedBody)
   const isPaid = result.transaction?.status === 'Paid'
+  let payment: any = {
+    ...getPaymentConfigStatus(),
+    required: !isPaid && Number(result.transaction?.final_amount_idr || 0) > 0,
+    snap_token: null,
+    redirect_url: null,
+    midtrans_order_id: result.transaction?.invoice_number || null
+  }
+
+  if (payment.required && isMidtransConfigured()) {
+    const session = await createOrGetBillingSnapSession(result.transaction.id, req.user)
+    payment = {
+      ...payment,
+      snap_token: session.snap_token,
+      redirect_url: session.redirect_url,
+      midtrans_order_id: session.midtrans_order_id
+    }
+  }
+
   return sendSuccess(
     res,
-    result,
+    {
+      ...result,
+      payment
+    },
     isPaid
       ? 'Paket berhasil diaktifkan.'
-      : 'Invoice dibuat. Selesaikan pembayaran & unggah bukti atau konfirmasi ke Admin WhatsApp untuk aktivasi.',
+      : 'Invoice dibuat. Selesaikan pembayaran melalui Midtrans untuk aktivasi otomatis.',
     201
   )
 }))

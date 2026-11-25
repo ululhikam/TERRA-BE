@@ -594,7 +594,13 @@ export async function createBillingCheckout(user, payload) {
       bundle_id: preview.bundle_id,
       promo_code: payload.promo_code ? String(payload.promo_code).trim().toUpperCase() : null,
       community_org_proof: payload.community_org_proof || null,
-      payment_method: isFree ? 'free' : payload.payment_method || 'manual_whatsapp',
+      payment_method: isFree ? 'free' : payload.payment_method || 'payment_gateway',
+      payment_provider: isFree ? null : 'midtrans',
+      payment_token: null,
+      payment_redirect_url: null,
+      payment_reference: null,
+      paid_at: null,
+      payment_metadata: {},
       base_price_idr: preview.base_price_idr,
       discount_idr: preview.discount_idr,
       upgrade_credit_idr: preview.upgrade_credit_idr,
@@ -644,7 +650,8 @@ export async function createBillingCheckout(user, payload) {
         bundle_id: preview.bundle_id,
         promo_code: payload.promo_code ? String(payload.promo_code).trim().toUpperCase() : null,
         community_org_proof: payload.community_org_proof || null,
-        payment_method: isFree ? 'free' : payload.payment_method || 'manual_whatsapp',
+        payment_method: isFree ? 'free' : payload.payment_method || 'payment_gateway',
+        payment_provider: isFree ? null : 'midtrans',
         base_price_idr: preview.base_price_idr,
         discount_idr: preview.discount_idr,
         upgrade_credit_idr: preview.upgrade_credit_idr,
@@ -1318,4 +1325,134 @@ export async function adminCreatePromo(payload) {
       is_active: payload.is_active !== false
     }
   })
+}
+
+export async function findBillingTransactionByIdOrInvoice(identifier: string) {
+  const clean = String(identifier || '').trim()
+  if (!clean) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
+  if (!usePrisma()) {
+    const tx = store.billingTransactions.find(
+      (t) =>
+        t.id === clean ||
+        t.invoice_number === clean ||
+        t.payment_metadata?.midtrans_order_id === clean
+    )
+    if (!tx) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
+    return tx
+  }
+  const tx = await prisma.billingTransaction.findFirst({
+    where: {
+      OR: [{ id: clean }, { invoice_number: clean }]
+    },
+    include: {
+      organization: { select: { id: true, name: true, email: true, phone: true } },
+      event: { select: { id: true, title: true } }
+    }
+  })
+  if (!tx) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
+  return tx
+}
+
+export async function updateBillingPaymentSession(txId: string, patch: Record<string, any>) {
+  if (!usePrisma()) {
+    const tx = store.billingTransactions.find((t) => t.id === txId)
+    if (!tx) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
+    Object.assign(tx, {
+      ...(patch.payment_provider !== undefined ? { payment_provider: patch.payment_provider } : {}),
+      ...(patch.payment_method !== undefined ? { payment_method: patch.payment_method } : {}),
+      ...(patch.payment_token !== undefined ? { payment_token: patch.payment_token } : {}),
+      ...(patch.payment_redirect_url !== undefined ? { payment_redirect_url: patch.payment_redirect_url } : {}),
+      ...(patch.payment_reference !== undefined ? { payment_reference: patch.payment_reference } : {}),
+      ...(patch.paid_at !== undefined ? { paid_at: patch.paid_at } : {}),
+      ...(patch.payment_metadata !== undefined
+        ? { payment_metadata: { ...(tx.payment_metadata || {}), ...patch.payment_metadata } }
+        : {}),
+      updated_at: new Date().toISOString()
+    })
+    return tx
+  }
+
+  const existing = await prisma.billingTransaction.findUnique({ where: { id: txId } })
+  if (!existing) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
+  const mergedMeta =
+    patch.payment_metadata !== undefined
+      ? { ...((existing.payment_metadata as Record<string, any>) || {}), ...patch.payment_metadata }
+      : undefined
+  return prisma.billingTransaction.update({
+    where: { id: txId },
+    data: {
+      ...(patch.payment_provider !== undefined ? { payment_provider: patch.payment_provider } : {}),
+      ...(patch.payment_method !== undefined ? { payment_method: patch.payment_method } : {}),
+      ...(patch.payment_token !== undefined ? { payment_token: patch.payment_token } : {}),
+      ...(patch.payment_redirect_url !== undefined ? { payment_redirect_url: patch.payment_redirect_url } : {}),
+      ...(patch.payment_reference !== undefined ? { payment_reference: patch.payment_reference } : {}),
+      ...(patch.paid_at !== undefined ? { paid_at: patch.paid_at } : {}),
+      ...(mergedMeta !== undefined ? { payment_metadata: mergedMeta } : {})
+    }
+  })
+}
+
+export async function settleOrUpdateBillingFromGateway(
+  txId: string,
+  normalizedState: string,
+  gatewayPayload: Record<string, any> = {}
+) {
+  const existing = await findBillingTransactionByIdOrInvoice(txId)
+
+  if (normalizedState === 'settled') {
+    if (existing.status === 'Paid') {
+      return { alreadySettled: true, transaction: existing }
+    }
+    await updateBillingPaymentSession(existing.id, {
+      payment_provider: 'midtrans',
+      payment_method: gatewayPayload.payment_type || existing.payment_method || 'midtrans_snap',
+      payment_reference: gatewayPayload.transaction_id || existing.payment_reference || null,
+      paid_at: new Date(),
+      payment_metadata: gatewayPayload
+    })
+    const verified = await adminVerifyBillingTransaction(
+      existing.id,
+      { id: 'midtrans-gateway', role: 'admin' },
+      {
+        status: 'Paid',
+        admin_notes: `Settled otomatis via Midtrans (${gatewayPayload.payment_type || 'snap'} • ${gatewayPayload.transaction_id || existing.invoice_number})`
+      }
+    )
+    return { alreadySettled: false, transaction: verified }
+  }
+
+  if (existing.status === 'Paid') {
+    if (normalizedState === 'refunded') {
+      const refunded = await adminVerifyBillingTransaction(
+        existing.id,
+        { id: 'midtrans-gateway', role: 'admin' },
+        {
+          status: 'Refunded',
+          admin_notes: `Refunded via Midtrans (${gatewayPayload.transaction_id || existing.invoice_number})`
+        }
+      )
+      return { alreadySettled: false, transaction: refunded }
+    }
+    return { alreadySettled: true, transaction: existing }
+  }
+
+  if (normalizedState === 'expired' || normalizedState === 'cancelled') {
+    const expired = await adminVerifyBillingTransaction(
+      existing.id,
+      { id: 'midtrans-gateway', role: 'admin' },
+      {
+        status: 'Expired',
+        admin_notes: `Pembayaran Midtrans ${normalizedState} (${gatewayPayload.transaction_id || existing.invoice_number})`
+      }
+    )
+    return { alreadySettled: false, transaction: expired }
+  }
+
+  const updated = await updateBillingPaymentSession(existing.id, {
+    payment_provider: 'midtrans',
+    payment_method: gatewayPayload.payment_type || existing.payment_method || 'midtrans_snap',
+    payment_reference: gatewayPayload.transaction_id || existing.payment_reference || null,
+    payment_metadata: gatewayPayload
+  })
+  return { alreadySettled: false, transaction: updated }
 }

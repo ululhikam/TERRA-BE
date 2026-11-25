@@ -4,6 +4,7 @@ import { checkDatabaseHealth } from '../config/prisma.js'
 import { env } from '../config/env.js'
 import { getEmailConfigStatus } from '../services/email.service.js'
 import { getStorageConfigStatus } from '../services/storage.service.js'
+import { getPaymentConfigStatus } from '../services/payment.service.js'
 import authRoutes from './auth.routes.js'
 import organizationsRoutes from './organizations.routes.js'
 import eventsRoutes from './events.routes.js'
@@ -15,6 +16,7 @@ import marketplaceRoutes from './marketplace.routes.js'
 import adminRoutes from './admin.routes.js'
 import mediaRoutes from './media.routes.js'
 import pricingRoutes from './pricing.routes.js'
+import paymentRoutes from './payment.routes.js'
 
 const router = Router()
 
@@ -29,6 +31,7 @@ router.get('/health', async (_req, res) => {
     supabase,
     storage: getStorageConfigStatus(),
     email: getEmailConfigStatus(),
+    payment: getPaymentConfigStatus(),
     timestamp: new Date().toISOString()
   })
 })
@@ -44,5 +47,6 @@ router.use(marketplaceRoutes)
 router.use(adminRoutes)
 router.use(mediaRoutes)
 router.use(pricingRoutes)
+router.use(paymentRoutes)
 
 export default router

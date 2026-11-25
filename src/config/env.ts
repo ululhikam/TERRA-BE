@@ -56,5 +56,9 @@ export const env: EnvConfig = {
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     'terra-local-oauth-secret'
   ).trim(),
-  adminWhatsappNumber: (process.env.ADMIN_WHATSAPP_NUMBER || '6287897192601').replace(/[^0-9]/g, '')
+  adminWhatsappNumber: (process.env.ADMIN_WHATSAPP_NUMBER || '6287897192601').replace(/[^0-9]/g, ''),
+  midtransServerKey: (process.env.MIDTRANS_SERVER_KEY || '').trim(),
+  midtransClientKey: (process.env.MIDTRANS_CLIENT_KEY || '').trim(),
+  midtransMerchantId: (process.env.MIDTRANS_MERCHANT_ID || '').trim(),
+  midtransIsProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true'
 }

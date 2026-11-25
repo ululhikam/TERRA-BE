@@ -414,7 +414,9 @@ export const billingPreviewSchema = z.object({
 
 export const billingCheckoutSchema = billingPreviewSchema.extend({
   organization_id: z.string().min(1, 'Organisasi wajib dipilih'),
-  payment_method: z.enum(['manual_whatsapp', 'manual_transfer', 'payment_gateway', 'free']).default('manual_whatsapp'),
+  payment_method: z
+    .enum(['payment_gateway', 'midtrans_snap', 'manual_whatsapp', 'manual_transfer', 'free'])
+    .default('payment_gateway'),
   community_org_proof: z.string().max(240).optional().default(''),
   payment_notes: z.string().max(300).optional().default('')
 })
