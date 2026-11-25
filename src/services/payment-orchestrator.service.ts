@@ -110,7 +110,7 @@ export async function createOrGetOrderSnapSession(orderId: string, user: any, { 
       email: attendee?.email || user?.email,
       phone: attendee?.phone || user?.phone || undefined
     },
-    finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || order.event_id)}?order_id=${encodeURIComponent(order.order_number)}`,
+    finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || order.event_id)}?order_ref=${encodeURIComponent(order.order_number)}`,
     expiryMinutes: 1440
   })
 
@@ -317,7 +317,12 @@ export async function applyMidtransStateToOrder(order: any, normalizedState: str
 
 async function fetchFirstResolvedMidtransStatus(candidateIds: Array<string | null | undefined>) {
   const uniqueIds = Array.from(
-    new Set(candidateIds.map((id) => String(id || '').trim()).filter(Boolean))
+    new Set(
+      candidateIds
+        .flatMap((id) => String(id || '').split(','))
+        .map((id) => id.trim())
+        .filter(Boolean)
+    )
   )
   let lastPayload: any = { transaction_status: 'pending', not_yet_submitted: true }
 

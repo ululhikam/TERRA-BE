@@ -101,7 +101,7 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
           email: attendee?.email || user.email,
           phone: attendee?.phone || user.phone || undefined
         },
-        finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || evt?.id || event_id)}?order_id=${encodeURIComponent(result.order.order_number)}`,
+        finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || evt?.id || event_id)}?order_ref=${encodeURIComponent(result.order.order_number)}`,
         expiryMinutes: 1440
       })
 

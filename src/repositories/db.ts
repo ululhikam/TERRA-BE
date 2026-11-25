@@ -1838,7 +1838,13 @@ export async function listOrdersByCustomer(customerId, userEmail = null) {
 }
 
 export async function findOrderById(id) {
-  const clean = String(id || '').trim()
+  const raw = Array.isArray(id) ? id[id.length - 1] : id
+  const clean =
+    String(raw || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop() || ''
   if (!clean) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
   const baseRef = clean.replace(/-R[A-Z0-9]+$/i, '')
   if (!usePrisma()) {

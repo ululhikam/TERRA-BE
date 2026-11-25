@@ -1125,7 +1125,13 @@ export async function adminCreatePromo(payload) {
 }
 
 export async function findBillingTransactionByIdOrInvoice(identifier: string) {
-  const clean = String(identifier || '').trim()
+  const raw = Array.isArray(identifier) ? identifier[identifier.length - 1] : identifier
+  const clean =
+    String(raw || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop() || ''
   if (!clean) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
   const baseRef = clean.replace(/-R[A-Z0-9]+$/i, '')
   if (!usePrisma()) {
