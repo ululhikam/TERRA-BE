@@ -265,6 +265,45 @@ class BackendStore {
         is_featured: false,
         enabled_modules: ['event_profile', 'timeline', 'tasks', 'team', 'ticketing', 'participants', 'check_in'],
         deleted_at: null
+      },
+      {
+        id: 'evt-paid-gateway-test',
+        organization_id: 'org-1',
+        title: 'TERRA Sound & Creative Fest 2026',
+        slug: 'terra-sound-creative-fest-2026',
+        description:
+          'Festival musik indie, pameran seni digital, dan creative market akhir tahun. Tiket berbayar resmi mendukung pembayaran instan Midtrans (QRIS, Virtual Account, GoPay, ShopeePay, dan Kartu).',
+        category_id: 'cat-1',
+        category: 'Musik & Konser',
+        poster_url: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=900&q=80',
+        banner_url: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=1400&q=80',
+        location_type: 'offline',
+        location_name: 'Gelora Bung Karno — Basket Hall Senayan',
+        address: 'Jl. Pintu Satu Senayan, Jakarta Pusat',
+        start_at: '2026-12-27T15:00:00+07:00',
+        end_at: '2026-12-27T23:00:00+07:00',
+        timezone: 'Asia/Jakarta',
+        capacity: 550,
+        status: 'Published',
+        publication_status: 'Published',
+        visibility: 'public',
+        is_featured: true,
+        enabled_modules: [
+          'event_profile',
+          'timeline',
+          'tasks',
+          'team',
+          'ticketing',
+          'participants',
+          'check_in',
+          'finance',
+          'vendors',
+          'sponsors',
+          'documents',
+          'feedback',
+          'reports'
+        ],
+        deleted_at: null
       }
     ]
 
@@ -327,6 +366,51 @@ class BackendStore {
         sale_end_at: '2026-12-19T23:59:00+07:00',
         min_per_order: 1,
         max_per_order: 2,
+        status: 'On Sale'
+      },
+      {
+        id: 'tkt-paid-early',
+        event_id: 'evt-paid-gateway-test',
+        name: 'Early Bird Festival Pass',
+        description: 'Tiket masuk harian TERRA Sound & Creative Fest (Pembayaran Midtrans).',
+        price: 25000,
+        currency: 'IDR',
+        quantity: 200,
+        sold_quantity: 12,
+        sale_start_at: '2026-10-01T00:00:00+07:00',
+        sale_end_at: '2026-12-27T15:00:00+07:00',
+        min_per_order: 1,
+        max_per_order: 5,
+        status: 'On Sale'
+      },
+      {
+        id: 'tkt-paid-reg',
+        event_id: 'evt-paid-gateway-test',
+        name: 'Regular Festival Pass',
+        description: 'Akses penuh seluruh panggung musik & area pameran seni digital.',
+        price: 75000,
+        currency: 'IDR',
+        quantity: 300,
+        sold_quantity: 24,
+        sale_start_at: '2026-10-01T00:00:00+07:00',
+        sale_end_at: '2026-12-27T15:00:00+07:00',
+        min_per_order: 1,
+        max_per_order: 5,
+        status: 'On Sale'
+      },
+      {
+        id: 'tkt-paid-vip',
+        event_id: 'evt-paid-gateway-test',
+        name: 'VIP Backstage & Lounge',
+        description: 'Jalur masuk prioritas, area VIP panggung utama, & merchandise eksklusif.',
+        price: 150000,
+        currency: 'IDR',
+        quantity: 50,
+        sold_quantity: 5,
+        sale_start_at: '2026-10-01T00:00:00+07:00',
+        sale_end_at: '2026-12-27T15:00:00+07:00',
+        min_per_order: 1,
+        max_per_order: 4,
         status: 'On Sale'
       }
     ]
