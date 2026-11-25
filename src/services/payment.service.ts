@@ -214,6 +214,10 @@ export async function createMidtransSnapTransaction({
     }
   }
 
+  const webhookUrl = /^https:\/\//i.test(env.appBaseUrl)
+    ? `${env.appBaseUrl}/api/v1/payments/midtrans/webhook`
+    : ''
+
   let response: Response
   try {
     response = await fetch(`${getSnapApiBaseUrl()}/transactions`, {
@@ -221,7 +225,8 @@ export async function createMidtransSnapTransaction({
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        Authorization: buildBasicAuthHeader()
+        Authorization: buildBasicAuthHeader(),
+        ...(webhookUrl ? { 'X-Override-Notification': webhookUrl } : {})
       },
       body: JSON.stringify(bodyPayload),
       signal: AbortSignal.timeout(12000)

@@ -247,7 +247,24 @@ export async function applyMidtransStateToOrder(order: any, normalizedState: str
   }
 }
 
-export async function syncOrderWithMidtrans(orderId: string, user: any) {
+async function fetchFirstResolvedMidtransStatus(candidateIds: Array<string | null | undefined>) {
+  const uniqueIds = Array.from(
+    new Set(candidateIds.map((id) => String(id || '').trim()).filter(Boolean))
+  )
+  let lastPayload: any = { transaction_status: 'pending', not_yet_submitted: true }
+
+  for (const id of uniqueIds) {
+    const payload = await fetchMidtransTransactionStatus(id)
+    if (payload?.not_yet_submitted) continue
+    lastPayload = payload
+    const mapped = mapMidtransTransactionState(payload)
+    if (mapped === 'settled') return payload
+  }
+
+  return lastPayload
+}
+
+export async function syncOrderWithMidtrans(orderId: string, user: any, { midtransOrderId }: { midtransOrderId?: string } = {}) {
   const order = await ticketingService.assertOrderAccessById(orderId, user)
 
   if (['Paid', 'Verified', 'Not Required'].includes(order.payment_status) || order.order_status === 'Confirmed') {
@@ -259,8 +276,11 @@ export async function syncOrderWithMidtrans(orderId: string, user: any) {
     return { payment_state: 'pending', configured: false, order, tickets }
   }
 
-  const midtransOrderId = order.payment_metadata?.midtrans_order_id || order.order_number
-  const statusPayload = await fetchMidtransTransactionStatus(midtransOrderId)
+  const statusPayload = await fetchFirstResolvedMidtransStatus([
+    midtransOrderId,
+    order.payment_metadata?.midtrans_order_id,
+    order.order_number
+  ])
   if (statusPayload?.not_yet_submitted) {
     const tickets = await ticketingService.listOrderTicketsWithQr(order.id)
     return { payment_state: 'pending', order, tickets }
@@ -270,7 +290,7 @@ export async function syncOrderWithMidtrans(orderId: string, user: any) {
   return applyMidtransStateToOrder(order, state, statusPayload, user)
 }
 
-export async function syncBillingWithMidtrans(txId: string, user: any) {
+export async function syncBillingWithMidtrans(txId: string, user: any, { midtransOrderId }: { midtransOrderId?: string } = {}) {
   const txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(txId)
   await ensureBillingAccess(txRecord, user)
 
@@ -299,8 +319,11 @@ export async function syncBillingWithMidtrans(txId: string, user: any) {
     }
   }
 
-  const midtransOrderId = txRecord.payment_metadata?.midtrans_order_id || txRecord.invoice_number
-  const statusPayload = await fetchMidtransTransactionStatus(midtransOrderId)
+  const statusPayload = await fetchFirstResolvedMidtransStatus([
+    midtransOrderId,
+    txRecord.payment_metadata?.midtrans_order_id,
+    txRecord.invoice_number
+  ])
   if (statusPayload?.not_yet_submitted) {
     return {
       payment_state: 'pending',
