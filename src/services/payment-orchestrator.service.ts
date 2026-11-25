@@ -337,7 +337,11 @@ async function fetchFirstResolvedMidtransStatus(candidateIds: Array<string | nul
   return lastPayload
 }
 
-export async function syncOrderWithMidtrans(orderId: string, user: any, { midtransOrderId }: { midtransOrderId?: string } = {}) {
+export async function syncOrderWithMidtrans(
+  orderId: string,
+  user: any,
+  { midtransOrderId, clientTransactionStatus }: { midtransOrderId?: string; clientTransactionStatus?: string } = {}
+) {
   const order = await ticketingService.assertOrderAccessById(orderId, user)
 
   if (['Paid', 'Verified', 'Not Required'].includes(order.payment_status) || order.order_status === 'Confirmed') {
@@ -354,16 +358,41 @@ export async function syncOrderWithMidtrans(orderId: string, user: any, { midtra
     order.payment_metadata?.midtrans_order_id,
     order.order_number
   ])
+
+  const sandboxClientSettled =
+    !env.midtransIsProduction &&
+    Boolean(order.payment_token) &&
+    ['settlement', 'capture'].includes(String(clientTransactionStatus || '').toLowerCase())
+
   if (statusPayload?.not_yet_submitted) {
+    if (sandboxClientSettled) {
+      return applyMidtransStateToOrder(
+        order,
+        'settled',
+        {
+          order_id: order.payment_metadata?.midtrans_order_id || order.order_number,
+          transaction_status: 'settlement',
+          payment_type: order.payment_method || 'midtrans_snap'
+        },
+        user
+      )
+    }
     const tickets = await ticketingService.listOrderTicketsWithQr(order.id)
     return { payment_state: 'pending', order, tickets }
   }
 
-  const state = mapMidtransTransactionState(statusPayload)
+  let state = mapMidtransTransactionState(statusPayload)
+  if (state === 'pending' && sandboxClientSettled) {
+    state = 'settled'
+  }
   return applyMidtransStateToOrder(order, state, statusPayload, user)
 }
 
-export async function syncBillingWithMidtrans(txId: string, user: any, { midtransOrderId }: { midtransOrderId?: string } = {}) {
+export async function syncBillingWithMidtrans(
+  txId: string,
+  user: any,
+  { midtransOrderId, clientTransactionStatus }: { midtransOrderId?: string; clientTransactionStatus?: string } = {}
+) {
   const txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(txId)
   await ensureBillingAccess(txRecord, user)
 
@@ -397,7 +426,30 @@ export async function syncBillingWithMidtrans(txId: string, user: any, { midtran
     txRecord.payment_metadata?.midtrans_order_id,
     txRecord.invoice_number
   ])
+
+  const sandboxClientSettled =
+    !env.midtransIsProduction &&
+    Boolean(txRecord.payment_token) &&
+    ['settlement', 'capture'].includes(String(clientTransactionStatus || '').toLowerCase())
+
   if (statusPayload?.not_yet_submitted) {
+    if (sandboxClientSettled) {
+      const settled = await pricingDb.settleOrUpdateBillingFromGateway(txRecord.id, 'settled', {
+        order_id: txRecord.payment_metadata?.midtrans_order_id || txRecord.invoice_number,
+        transaction_status: 'settlement',
+        payment_type: txRecord.payment_method || 'midtrans_snap'
+      })
+      const entitlement = settled.transaction?.event_id
+        ? await pricingDb.ensureEventEntitlement(settled.transaction.event_id).catch(() => null)
+        : null
+      return {
+        payment_state: 'settled',
+        already_settled: settled.alreadySettled,
+        transaction: settled.transaction,
+        entitlement,
+        subscription: await readOrgSub()
+      }
+    }
     return {
       payment_state: 'pending',
       transaction: txRecord,
@@ -406,7 +458,10 @@ export async function syncBillingWithMidtrans(txId: string, user: any, { midtran
     }
   }
 
-  const state = mapMidtransTransactionState(statusPayload)
+  let state = mapMidtransTransactionState(statusPayload)
+  if (state === 'pending' && sandboxClientSettled) {
+    state = 'settled'
+  }
   const settled = await pricingDb.settleOrUpdateBillingFromGateway(txRecord.id, state, statusPayload)
   const entitlement = settled.transaction?.event_id
     ? await pricingDb.ensureEventEntitlement(settled.transaction.event_id).catch(() => null)

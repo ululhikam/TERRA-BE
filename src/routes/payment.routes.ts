@@ -28,7 +28,11 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const midtransOrderId = req.body?.midtrans_order_id ? String(req.body.midtrans_order_id) : undefined
-    const result = await paymentOrchestrator.syncOrderWithMidtrans(req.params.orderId, req.user, { midtransOrderId })
+    const clientTransactionStatus = req.body?.transaction_status ? String(req.body.transaction_status) : undefined
+    const result = await paymentOrchestrator.syncOrderWithMidtrans(req.params.orderId, req.user, {
+      midtransOrderId,
+      clientTransactionStatus
+    })
     return sendSuccess(res, result, 'Status pembayaran order berhasil disinkronkan.')
   })
 )
@@ -51,7 +55,11 @@ router.post(
   requireOrganizerOrAdmin,
   asyncHandler(async (req, res) => {
     const midtransOrderId = req.body?.midtrans_order_id ? String(req.body.midtrans_order_id) : undefined
-    const result = await paymentOrchestrator.syncBillingWithMidtrans(req.params.txId, req.user, { midtransOrderId })
+    const clientTransactionStatus = req.body?.transaction_status ? String(req.body.transaction_status) : undefined
+    const result = await paymentOrchestrator.syncBillingWithMidtrans(req.params.txId, req.user, {
+      midtransOrderId,
+      clientTransactionStatus
+    })
     return sendSuccess(res, result, 'Status transaksi billing berhasil disinkronkan.')
   })
 )
