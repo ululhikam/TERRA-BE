@@ -40,15 +40,42 @@ export async function createOrGetOrderSnapSession(orderId: string, user: any, { 
 
   const cachedToken = order.payment_token
   const notExpired = !order.payment_expires_at || new Date(order.payment_expires_at).getTime() > Date.now()
+  let shouldBypassCache = false
   if (!forceNew && cachedToken && notExpired) {
-    return {
-      ...getPaymentConfigStatus(),
-      order_id: order.id,
-      order_number: order.order_number,
-      snap_token: cachedToken,
-      redirect_url: order.payment_redirect_url || '',
-      midtrans_order_id: order.payment_metadata?.midtrans_order_id || order.order_number,
-      gross_amount: Math.round(Number(order.total))
+    const prevMidtransId = order.payment_metadata?.midtrans_order_id || order.order_number
+    const live = isMidtransConfigured() ? await fetchMidtransTransactionStatus(prevMidtransId).catch(() => null) : null
+    if (live && !live.not_yet_submitted) {
+      const liveState = mapMidtransTransactionState(live)
+      if (liveState === 'settled') {
+        const settledRes = await applyMidtransStateToOrder(order, 'settled', live, user)
+        return {
+          ...getPaymentConfigStatus(),
+          already_settled: true,
+          payment_state: 'settled',
+          order_id: order.id,
+          order_number: order.order_number,
+          snap_token: null,
+          redirect_url: order.payment_redirect_url || '',
+          midtrans_order_id: prevMidtransId,
+          gross_amount: Math.round(Number(order.total)),
+          order: settledRes.order,
+          tickets: settledRes.tickets
+        }
+      }
+      if (['expired', 'cancelled', 'denied', 'failed'].includes(liveState)) {
+        shouldBypassCache = true
+      }
+    }
+    if (!shouldBypassCache) {
+      return {
+        ...getPaymentConfigStatus(),
+        order_id: order.id,
+        order_number: order.order_number,
+        snap_token: cachedToken,
+        redirect_url: order.payment_redirect_url || '',
+        midtrans_order_id: prevMidtransId,
+        gross_amount: Math.round(Number(order.total))
+      }
     }
   }
 
@@ -121,15 +148,41 @@ export async function createOrGetBillingSnapSession(txId: string, user: any, { f
 
   const cachedToken = txRecord.payment_token
   const notExpired = !txRecord.expires_at || new Date(txRecord.expires_at).getTime() > Date.now()
+  let shouldBypassBillingCache = false
   if (!forceNew && cachedToken && notExpired && txRecord.status === 'Pending') {
-    return {
-      ...getPaymentConfigStatus(),
-      transaction_id: txRecord.id,
-      invoice_number: txRecord.invoice_number,
-      snap_token: cachedToken,
-      redirect_url: txRecord.payment_redirect_url || '',
-      midtrans_order_id: txRecord.payment_metadata?.midtrans_order_id || txRecord.invoice_number,
-      gross_amount: Math.round(Number(txRecord.final_amount_idr))
+    const prevMidtransId = txRecord.payment_metadata?.midtrans_order_id || txRecord.invoice_number
+    const live = isMidtransConfigured() ? await fetchMidtransTransactionStatus(prevMidtransId).catch(() => null) : null
+    if (live && !live.not_yet_submitted) {
+      const liveState = mapMidtransTransactionState(live)
+      if (liveState === 'settled') {
+        const settled = await pricingDb.settleOrUpdateBillingFromGateway(txRecord.id, 'settled', live)
+        return {
+          ...getPaymentConfigStatus(),
+          already_settled: true,
+          payment_state: 'settled',
+          transaction_id: txRecord.id,
+          invoice_number: txRecord.invoice_number,
+          snap_token: null,
+          redirect_url: txRecord.payment_redirect_url || '',
+          midtrans_order_id: prevMidtransId,
+          gross_amount: Math.round(Number(txRecord.final_amount_idr)),
+          transaction: settled.transaction
+        }
+      }
+      if (['expired', 'cancelled', 'denied', 'failed'].includes(liveState)) {
+        shouldBypassBillingCache = true
+      }
+    }
+    if (!shouldBypassBillingCache) {
+      return {
+        ...getPaymentConfigStatus(),
+        transaction_id: txRecord.id,
+        invoice_number: txRecord.invoice_number,
+        snap_token: cachedToken,
+        redirect_url: txRecord.payment_redirect_url || '',
+        midtrans_order_id: prevMidtransId,
+        gross_amount: Math.round(Number(txRecord.final_amount_idr))
+      }
     }
   }
 
@@ -201,13 +254,28 @@ export async function applyMidtransStateToOrder(order: any, normalizedState: str
         transaction_id: gatewayPayload.transaction_id || null
       }
     })
-    const dispatched = await ticketingService.dispatchSettledOrderEmailAndQr(settled, fallbackUser)
-    return {
-      payment_state: 'settled',
-      already_settled: Boolean(settled.alreadySettled),
-      order: dispatched.order,
-      tickets: dispatched.tickets,
-      email_status: dispatched.email_status
+    try {
+      const dispatched = await ticketingService.dispatchSettledOrderEmailAndQr(settled, fallbackUser)
+      return {
+        payment_state: 'settled',
+        already_settled: Boolean(settled.alreadySettled),
+        order: dispatched.order,
+        tickets: dispatched.tickets,
+        email_status: dispatched.email_status
+      }
+    } catch (emailErr: any) {
+      console.error('[Midtrans Order Email Error]', emailErr?.message || emailErr)
+      const tickets = await ticketingService.listOrderTicketsWithQr(order.id).catch(() => settled.tickets || [])
+      return {
+        payment_state: 'settled',
+        already_settled: Boolean(settled.alreadySettled),
+        order: settled.order,
+        tickets,
+        email_status: {
+          sent: false,
+          reason: emailErr?.message || 'Gagal mengirim email QR.'
+        }
+      }
     }
   }
 
@@ -379,13 +447,36 @@ export async function processMidtransWebhook(payload: Record<string, any>) {
     incomingAmount
   })
 
+  if (midtransOrderId.toLowerCase().startsWith('payment_notif_test_')) {
+    return {
+      target_type: 'test_notification',
+      reference: midtransOrderId,
+      payment_state: state,
+      acknowledged: true
+    }
+  }
+
   // Route to BillingTransaction for INV-* invoices or Order for ORD-* / others
   if (baseRef.toUpperCase().startsWith('INV-')) {
     let txRecord: any
     try {
       txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(midtransOrderId)
     } catch {
-      txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(baseRef)
+      try {
+        txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(baseRef)
+      } catch (lookupErr: any) {
+        if (lookupErr?.statusCode === 404) {
+          console.warn('[Midtrans Webhook] Unknown reference acknowledged to prevent retry storm:', midtransOrderId)
+          return {
+            target_type: 'unknown_reference',
+            reference: midtransOrderId,
+            payment_state: state,
+            acknowledged: true,
+            ignored: true
+          }
+        }
+        throw lookupErr
+      }
     }
 
     const expectedAmount = Math.round(Number(txRecord.final_amount_idr || 0))
@@ -411,7 +502,21 @@ export async function processMidtransWebhook(payload: Record<string, any>) {
   try {
     order = await db.findOrderByOrderNumber(midtransOrderId)
   } catch {
-    order = await db.findOrderByOrderNumber(baseRef)
+    try {
+      order = await db.findOrderByOrderNumber(baseRef)
+    } catch (lookupErr: any) {
+      if (lookupErr?.statusCode === 404) {
+        console.warn('[Midtrans Webhook] Unknown reference acknowledged to prevent retry storm:', midtransOrderId)
+        return {
+          target_type: 'unknown_reference',
+          reference: midtransOrderId,
+          payment_state: state,
+          acknowledged: true,
+          ignored: true
+        }
+      }
+      throw lookupErr
+    }
   }
 
   const expectedAmount = Math.round(Number(order.total || 0))

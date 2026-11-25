@@ -1838,12 +1838,25 @@ export async function listOrdersByCustomer(customerId, userEmail = null) {
 }
 
 export async function findOrderById(id) {
+  const clean = String(id || '').trim()
+  if (!clean) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
+  const baseRef = clean.replace(/-R[A-Z0-9]+$/i, '')
   if (!usePrisma()) {
-    const ord = store.orders.find((o) => o.id === id)
+    const ord = store.orders.find(
+      (o) =>
+        o.id === clean ||
+        o.order_number === clean ||
+        o.order_number === baseRef ||
+        o.payment_metadata?.midtrans_order_id === clean
+    )
     if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
     return ord
   }
-  const ord = await prisma.order.findUnique({ where: { id } })
+  const orFilters: any[] = [{ id: clean }, { order_number: clean }]
+  if (baseRef && baseRef !== clean) {
+    orFilters.push({ order_number: baseRef })
+  }
+  const ord = await prisma.order.findFirst({ where: { OR: orFilters } })
   if (!ord) throw new AppError('Order tidak ditemukan.', 404, 'ORDER_NOT_FOUND')
   return ord
 }
@@ -1905,16 +1918,25 @@ export async function createOrder({ event_id, ticket_type_id, quantity, attendee
       if (byEmail) {
         resolvedCustomerId = byEmail.id
       } else {
-        const syncedCustomer = await prisma.customer.create({
-          data: {
-            id: customer_id,
-            full_name: buyerProfile?.full_name || attendee.full_name,
-            email: buyerEmail,
-            phone: buyerProfile?.phone || attendee.phone || null,
-            email_verified: true
+        try {
+          const syncedCustomer = await prisma.customer.create({
+            data: {
+              id: customer_id,
+              full_name: buyerProfile?.full_name || attendee.full_name,
+              email: buyerEmail,
+              phone: buyerProfile?.phone || attendee.phone || null,
+              email_verified: true
+            }
+          })
+          resolvedCustomerId = syncedCustomer.id
+        } catch {
+          const fallbackCustomer = await prisma.customer.findFirst({
+            where: { email: { equals: buyerEmail, mode: 'insensitive' } }
+          })
+          if (fallbackCustomer) {
+            resolvedCustomerId = fallbackCustomer.id
           }
-        })
-        resolvedCustomerId = syncedCustomer.id
+        }
       }
     }
   }

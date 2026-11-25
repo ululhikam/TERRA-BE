@@ -18,6 +18,7 @@ import {
 } from '../validators/schemas.js'
 import * as db from '../repositories/db.js'
 import * as ticketingService from '../services/ticketing.service.js'
+import { cancelMidtransTransaction } from '../services/payment.service.js'
 import { getEmailPreviewById, getEmailPreviewByOrderId } from '../services/email.service.js'
 import { uploadBufferToStorage, uploadSingleFile } from '../services/storage.service.js'
 import { verifyEmailPreviewToken } from '../utils/qrcode.js'
@@ -94,7 +95,7 @@ router.post('/orders', requireAuth, validateBody(orderCreateSchema), asyncHandle
   })
   const msg = result.order?.order_status === 'Confirmed'
     ? 'Pesanan berhasil dibuat dan email QR telah dikirim.'
-    : 'Pesanan berhasil dibuat. Unggah bukti pembayaran atau tunggu verifikasi penyelenggara untuk mengaktifkan QR.'
+    : 'Pesanan berhasil dibuat. Selesaikan pembayaran melalui Midtrans untuk mengaktifkan e-tiket QR.'
   return sendSuccess(res, result, msg, 201)
 }))
 
@@ -103,13 +104,14 @@ router.post(
   requireAuth,
   uploadSingleFile.single('file'),
   asyncHandler(async (req, res) => {
+    const existing = await ticketingService.assertOrderAccessById(req.params.id, req.user)
     let proofUrl = req.body?.payment_proof_url || ''
     if (req.file) {
       const uploaded = await uploadBufferToStorage({
         buffer: req.file.buffer,
         originalName: req.file.originalname,
         mimeType: req.file.mimetype,
-        folder: `orders/${req.params.id}/proofs`,
+        folder: `orders/${existing.id}/proofs`,
         bucketType: 'documents',
         ownerId: req.user.id
       })
@@ -118,22 +120,27 @@ router.post(
     if (!proofUrl) {
       throw new AppError('Unggah gambar/dokumen bukti pembayaran terlebih dahulu.', 400, 'PROOF_REQUIRED')
     }
-    const updated = await db.submitOrderPaymentProof(req.params.id, req.user, {
-      payment_proof_url: proofUrl,
-      payment_notes: req.body?.payment_notes || ''
-    })
+    const updated = await db.submitOrderPaymentProof(
+      existing.id,
+      { ...req.user, id: existing.customer_id || req.user.id },
+      {
+        payment_proof_url: proofUrl,
+        payment_notes: req.body?.payment_notes || ''
+      }
+    )
     return sendSuccess(res, updated, 'Bukti pembayaran berhasil dikirim ke penyelenggara.')
   })
 )
 
 router.post('/orders/:id/cancel', requireAuth, asyncHandler(async (req, res) => {
-  const existing = await db.findOrderById(req.params.id)
-  let authorized = req.user.role === 'admin' || existing.customer_id === req.user.id
-  if (!authorized && existing.event_id) {
-    const perms = await getUserEventPermissions(req.user, existing.event_id)
-    authorized = perms.includes('Manage Tickets')
+  const existing = await ticketingService.assertOrderAccessById(req.params.id, req.user)
+  if (existing.payment_provider === 'midtrans' && existing.payment_status === 'Pending') {
+    const midtransId = existing.payment_metadata?.midtrans_order_id || existing.order_number
+    if (midtransId) {
+      await cancelMidtransTransaction(midtransId).catch(() => {})
+    }
   }
-  const order = await db.cancelOrder(req.params.id, req.user.id, authorized)
+  const order = await db.cancelOrder(existing.id, req.user.id, true)
   return sendSuccess(res, order, 'Pesanan dibatalkan dan kuota tiket dikembalikan.')
 }))
 

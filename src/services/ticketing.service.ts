@@ -84,44 +84,53 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   }
 
   if (payment.required && isMidtransConfigured()) {
-    const snap = await createMidtransSnapTransaction({
-      midtransOrderId: result.order.order_number,
-      grossAmount: Number(result.order.total),
-      itemDetails: [
-        {
-          id: String(ticket_type_id).slice(0, 50),
-          price: Math.round(Number(result.order.total) / Math.max(1, Number(quantity || 1))),
-          quantity: Math.max(1, Number(quantity || 1)),
-          name: `${evt?.title || 'TERRA Event'} - ${result.participant?.ticket_type || 'Tiket'}`.slice(0, 50)
-        }
-      ],
-      customerDetails: {
-        first_name: attendee?.full_name || user.full_name,
-        email: attendee?.email || user.email,
-        phone: attendee?.phone || user.phone || undefined
-      },
-      finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || evt?.id || event_id)}?order_id=${encodeURIComponent(result.order.order_number)}`,
-      expiryMinutes: 1440
-    })
+    try {
+      const snap = await createMidtransSnapTransaction({
+        midtransOrderId: result.order.order_number,
+        grossAmount: Number(result.order.total),
+        itemDetails: [
+          {
+            id: String(ticket_type_id).slice(0, 50),
+            price: Math.round(Number(result.order.total) / Math.max(1, Number(quantity || 1))),
+            quantity: Math.max(1, Number(quantity || 1)),
+            name: `${evt?.title || 'TERRA Event'} - ${result.participant?.ticket_type || 'Tiket'}`.slice(0, 50)
+          }
+        ],
+        customerDetails: {
+          first_name: attendee?.full_name || user.full_name,
+          email: attendee?.email || user.email,
+          phone: attendee?.phone || user.phone || undefined
+        },
+        finishRedirectUrl: `${env.frontendUrl}/checkout/${encodeURIComponent(evt?.slug || evt?.id || event_id)}?order_id=${encodeURIComponent(result.order.order_number)}`,
+        expiryMinutes: 1440
+      })
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-    await db.updateOrderPaymentSession(result.order.id, {
-      payment_provider: 'midtrans',
-      payment_method: 'midtrans_snap',
-      payment_token: snap.token,
-      payment_redirect_url: snap.redirect_url,
-      payment_expires_at: expiresAt,
-      payment_metadata: { midtrans_order_id: snap.midtrans_order_id }
-    })
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      await db.updateOrderPaymentSession(result.order.id, {
+        payment_provider: 'midtrans',
+        payment_method: 'midtrans_snap',
+        payment_token: snap.token,
+        payment_redirect_url: snap.redirect_url,
+        payment_expires_at: expiresAt,
+        payment_metadata: { midtrans_order_id: snap.midtrans_order_id }
+      })
 
-    result.order.payment_token = snap.token
-    result.order.payment_redirect_url = snap.redirect_url
-    payment = {
-      ...payment,
-      snap_token: snap.token,
-      redirect_url: snap.redirect_url,
-      midtrans_order_id: snap.midtrans_order_id,
-      expires_at: expiresAt.toISOString()
+      result.order.payment_token = snap.token
+      result.order.payment_redirect_url = snap.redirect_url
+      payment = {
+        ...payment,
+        snap_token: snap.token,
+        redirect_url: snap.redirect_url,
+        midtrans_order_id: snap.midtrans_order_id,
+        expires_at: expiresAt.toISOString()
+      }
+    } catch (snapErr: any) {
+      console.warn('[Ticketing Midtrans Init Warning]', snapErr?.message || snapErr)
+      payment = {
+        ...payment,
+        snap_token: null,
+        snap_error: snapErr?.message || 'Gagal membuat sesi awal Midtrans.'
+      }
     }
   }
 

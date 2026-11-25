@@ -1153,6 +1153,62 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       assert.equal(invSettle.status, 200)
       assert.equal(invSettle.data.data.target_type, 'billing_transaction')
       assert.equal(invSettle.data.data.status, 'Paid')
+
+      // 9. Order sync resolves by order_number & retry reference; valid test/unknown Midtrans webhook acknowledges 200
+      const syncByNumber = await request(`/payments/orders/${encodeURIComponent(orderNumber)}/sync`, {
+        method: 'POST',
+        token: 'demo-token-customer',
+        body: {}
+      })
+      assert.equal(syncByNumber.status, 200)
+      assert.equal(syncByNumber.data.data.order.order_number, orderNumber)
+
+      const syncByRetryRef = await request(`/payments/orders/${encodeURIComponent(`${orderNumber}-RTEST1`)}/sync`, {
+        method: 'POST',
+        token: 'demo-token-customer',
+        body: {}
+      })
+      assert.equal(syncByRetryRef.status, 200)
+      assert.equal(syncByRetryRef.data.data.order.order_number, orderNumber)
+
+      const testPingSig = computeMidtransSignature({
+        orderId: 'payment_notif_test_12345',
+        statusCode: '200',
+        grossAmount: '10000.00',
+        serverKey: env.midtransServerKey
+      })
+      const testPingRes = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: 'payment_notif_test_12345',
+          status_code: '200',
+          gross_amount: '10000.00',
+          transaction_status: 'settlement',
+          signature_key: testPingSig
+        }
+      })
+      assert.equal(testPingRes.status, 200)
+      assert.equal(testPingRes.data.data.acknowledged, true)
+
+      const unknownOrderSig = computeMidtransSignature({
+        orderId: 'ORD-OTHER-ENV-999',
+        statusCode: '200',
+        grossAmount: '25000.00',
+        serverKey: env.midtransServerKey
+      })
+      const unknownOrderRes = await request('/payments/midtrans/webhook', {
+        method: 'POST',
+        body: {
+          order_id: 'ORD-OTHER-ENV-999',
+          status_code: '200',
+          gross_amount: '25000.00',
+          transaction_status: 'settlement',
+          signature_key: unknownOrderSig
+        }
+      })
+      assert.equal(unknownOrderRes.status, 200)
+      assert.equal(unknownOrderRes.data.data.acknowledged, true)
+      assert.equal(unknownOrderRes.data.data.ignored, true)
     } finally {
       globalThis.fetch = originalFetch
       env.midtransServerKey = prevServerKey

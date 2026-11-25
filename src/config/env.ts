@@ -1,26 +1,30 @@
 import 'dotenv/config'
 import type { EnvConfig } from '../types/domain.js'
 
+export const CANONICAL_BACKEND_URL = 'https://backend-six-sand-66.vercel.app'
+export const CANONICAL_SITE_URL = 'https://terra.concern.web.id'
+
 function resolveAppBaseUrl(): string {
-  const explicit = (process.env.APP_BASE_URL || '').trim()
-  if (explicit) return explicit.replace(/\/+$/, '')
+  const explicit = (process.env.APP_BASE_URL || '').trim().replace(/\/+$/, '')
+  if (explicit) {
+    if (/^https?:\/\/terra-concern\.vercel\.app$/i.test(explicit)) {
+      return CANONICAL_BACKEND_URL
+    }
+    return explicit
+  }
 
   const vercelProd = (process.env.VERCEL_PROJECT_PRODUCTION_URL || '').trim()
-  if (vercelProd) {
+  if (vercelProd && !/^[a-z0-9-]+-concern2\.vercel\.app$/i.test(vercelProd)) {
     const withProto = vercelProd.startsWith('http') ? vercelProd : `https://${vercelProd}`
     return withProto.replace(/\/+$/, '')
   }
 
-  const vercelUrl = (process.env.VERCEL_URL || '').trim()
-  if (vercelUrl) {
-    const withProto = vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`
-    return withProto.replace(/\/+$/, '')
+  if (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) {
+    return CANONICAL_BACKEND_URL
   }
 
   return `http://localhost:${process.env.PORT || 3000}`
 }
-
-export const CANONICAL_SITE_URL = 'https://terra.concern.web.id'
 
 function resolveFrontendUrl(): string {
   const explicit = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '')

@@ -201,10 +201,14 @@ export async function createMidtransSnapTransaction({
   }
 
   if (customerDetails && (customerDetails.first_name || customerDetails.email || customerDetails.phone)) {
-    bodyPayload.customer_details = {
+    const cleanPhone = String(customerDetails.phone || '').replace(/[^0-9+]/g, '').slice(0, 18)
+    const custBlock: Record<string, string> = {
       ...(customerDetails.first_name ? { first_name: String(customerDetails.first_name).slice(0, 120) } : {}),
       ...(customerDetails.email ? { email: String(customerDetails.email).slice(0, 120) } : {}),
-      ...(customerDetails.phone ? { phone: String(customerDetails.phone).slice(0, 19) } : {})
+      ...(cleanPhone.length >= 6 ? { phone: cleanPhone } : {})
+    }
+    if (Object.keys(custBlock).length) {
+      bodyPayload.customer_details = custBlock
     }
   }
 
@@ -214,9 +218,14 @@ export async function createMidtransSnapTransaction({
     }
   }
 
-  const webhookUrl = /^https:\/\//i.test(env.appBaseUrl)
-    ? `${env.appBaseUrl}/api/v1/payments/midtrans/webhook`
-    : ''
+  const explicitWebhook = (process.env.MIDTRANS_NOTIFICATION_URL || '').trim()
+  const isSafeHttpsBase =
+    /^https:\/\//i.test(env.appBaseUrl) && !/^https:\/\/[a-z0-9-]+-concern2\.vercel\.app/i.test(env.appBaseUrl)
+  const webhookUrl = /^https:\/\//i.test(explicitWebhook)
+    ? explicitWebhook
+    : isSafeHttpsBase
+      ? `${env.appBaseUrl}/api/v1/payments/midtrans/webhook`
+      : ''
 
   let response: Response
   try {
