@@ -34,13 +34,13 @@ app.use(
       if (env.nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalized)) {
         return callback(null, true)
       }
-      if (/^https:\/\/([a-z0-9-]+\.)?concern\.web\.id$/i.test(normalized)) {
+      if (/^https:\/\/([a-z0-9-]+\.)*concern\.web\.id$/i.test(normalized)) {
         return callback(null, true)
       }
       if (/^https:\/\/(terra-concern|frontend-[a-z0-9-]+-concern2)\.vercel\.app$/i.test(normalized)) {
         return callback(null, true)
       }
-      if (/^https:\/\/([a-z0-9-]+\.)?midtrans\.com$/i.test(normalized)) {
+      if (/^https:\/\/([a-z0-9-]+\.)*midtrans\.com$/i.test(normalized)) {
         return callback(null, true)
       }
       return callback(new Error('Origin tidak diizinkan oleh CORS policy'))
