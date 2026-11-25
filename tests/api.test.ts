@@ -501,117 +501,108 @@ describe('TERRA Backend API v1 Integration Tests', () => {
     assert.equal(delRes.status, 200)
   })
 
-  it('enforces per-event TERRA pricing, 14-day Pro trial anti-abuse, module/quota gates, bundles, downgrade & admin verification', async () => {
+  it('enforces single Rp 50K monthly subscription, blocks unsubscribed organizers, and unlocks all modules upon Midtrans payment', async () => {
     const catalogRes = await request('/pricing/catalog')
     assert.equal(catalogRes.status, 200)
-    assert.equal(catalogRes.data.data.admin_whatsapp, '6287897192601')
-    assert.equal(catalogRes.data.data.plans.length, 4)
+    assert.equal(catalogRes.data.data.plans.length, 1)
+    assert.equal(catalogRes.data.data.plans[0].code, 'monthly_50k')
+    assert.equal(catalogRes.data.data.plans[0].price_idr, 50000)
+    assert.equal(catalogRes.data.data.manual_payment_enabled, false)
 
-    // Create a brand new event -> starts on FREE (Rp 0)
-    const evtRes = await request('/events', {
+    // Unsubscribed newly registered Organizer starts with unpaid status & cannot access workspace features
+    const unsubUser = {
+      id: 'usr-org-unsub',
+      full_name: 'Rani Unsubscribed',
+      email: 'rani-unsub@eo.id',
+      role: 'organizer',
+      email_verified: true,
+      subscription_plan: 'unsubscribed',
+      subscription_status: 'unpaid',
+      subscription_expires_at: null
+    }
+    store.users.push(unsubUser)
+    const unsubToken = signOAuthToken({ id: unsubUser.id, email: unsubUser.email, role: 'organizer' })
+
+    const blockedEvent = await request('/events', {
       method: 'POST',
-      token: 'demo-token-organizer',
+      token: unsubToken,
       body: {
         organization_id: 'org-1',
+        title: 'Blocked Unsubscribed Event',
+        start_at: '2026-12-25T09:00:00+07:00',
+        end_at: '2026-12-25T17:00:00+07:00',
+        capacity: 150
+      }
+    })
+    assert.equal(blockedEvent.status, 403)
+    assert.equal(blockedEvent.data.error.code, 'SUBSCRIPTION_REQUIRED')
+
+    // Subscribe via Midtrans checkout endpoint (auto-creates default org for organizer)
+    const subRes = await request('/billing/subscribe', {
+      method: 'POST',
+      token: unsubToken,
+      body: {}
+    })
+    assert.equal(subRes.status, 201)
+    const tx = subRes.data.data.transaction
+    assert.equal(tx.status, 'Pending')
+    assert.equal(tx.final_amount_idr, 50000)
+
+    // Still locked before payment settles
+    const stillLocked = await request('/events', {
+      method: 'POST',
+      token: unsubToken,
+      body: {
+        organization_id: tx.organization_id,
+        title: 'Still Locked Event',
+        start_at: '2026-12-25T09:00:00+07:00',
+        end_at: '2026-12-25T17:00:00+07:00',
+        capacity: 100
+      }
+    })
+    assert.equal(stillLocked.status, 403)
+
+    // Manual proof upload endpoint is disabled (Midtrans only)
+    const disabledProof = await request(`/billing/transactions/${tx.id}/proof`, {
+      method: 'POST',
+      token: unsubToken,
+      body: { payment_proof_url: 'https://example.com/p.png' }
+    })
+    assert.equal(disabledProof.status, 410)
+
+    // Settle subscription -> unlocks full Organizer Studio & event creation
+    const verifyRes = await request(`/admin/billing/transactions/${tx.id}/verify`, {
+      method: 'POST',
+      token: 'demo-token-admin',
+      body: { status: 'Paid', admin_notes: 'Settled Rp 50.000' }
+    })
+    assert.equal(verifyRes.status, 200)
+    assert.equal(verifyRes.data.data.status, 'Paid')
+
+    const meRes = await request('/auth/me', { token: unsubToken })
+    assert.equal(meRes.status, 200)
+    assert.equal(meRes.data.data.user.subscription.is_active, true)
+    assert.equal(meRes.data.data.user.subscription.plan, 'monthly_50k')
+
+    const unlockedEvt = await request('/events', {
+      method: 'POST',
+      token: unsubToken,
+      body: {
+        organization_id: tx.organization_id,
         title: 'Campus Hackathon 2026',
         start_at: '2026-12-25T09:00:00+07:00',
         end_at: '2026-12-25T17:00:00+07:00',
         capacity: 150
       }
     })
-    assert.equal(evtRes.status, 201)
-    const freeEventId = evtRes.data.data.id
-    assert.equal(evtRes.data.data.entitlement.plan_code, 'free')
+    assert.equal(unlockedEvt.status, 201)
 
-    // Enabling Finance on FREE event must fail with PLAN_UPGRADE_REQUIRED
-    const blockedEnable = await request(`/events/${freeEventId}/modules/finance`, {
+    const unlockFinance = await request(`/events/${unlockedEvt.data.data.id}/modules/finance`, {
       method: 'PATCH',
-      token: 'demo-token-organizer',
+      token: unsubToken,
       body: { is_enabled: true }
     })
-    assert.equal(blockedEnable.status, 403)
-    assert.equal(blockedEnable.data.error.code, 'PLAN_UPGRADE_REQUIRED')
-
-    // Activate 14 Days Pro Access trial on event -> unlocks Pro modules; second trial attempt fails anti-abuse
-    const trialRes = await request(`/events/${freeEventId}/subscription/trial`, {
-      method: 'POST',
-      token: 'demo-token-organizer'
-    })
-    assert.equal(trialRes.status, 201)
-    assert.equal(trialRes.data.data.trial.is_trial, true)
-    assert.equal(trialRes.data.data.plan_code, 'pro')
-
-    const secondTrial = await request(`/events/${freeEventId}/subscription/trial`, {
-      method: 'POST',
-      token: 'demo-token-organizer'
-    })
-    assert.equal(secondTrial.status, 409)
-
-    // Downgrade from Trial Pro back to Free preserves data
-    const downRes = await request(`/events/${freeEventId}/subscription/downgrade`, {
-      method: 'POST',
-      token: 'demo-token-organizer',
-      body: { plan_code: 'free' }
-    })
-    assert.equal(downRes.status, 200)
-    assert.equal(downRes.data.data.plan_code, 'free')
-
-    // Preview & Checkout PRO event plan with promo EARLY100 -> status starts as Pending (does NOT auto-activate)
-    const checkoutRes = await request('/billing/checkout', {
-      method: 'POST',
-      token: 'demo-token-organizer',
-      body: {
-        organization_id: 'org-1',
-        event_id: freeEventId,
-        plan_code: 'pro',
-        promo_code: 'EARLY100',
-        payment_method: 'manual_whatsapp'
-      }
-    })
-    assert.equal(checkoutRes.status, 201)
-    const txId = checkoutRes.data.data.transaction.id
-    assert.equal(checkoutRes.data.data.transaction.status, 'Pending')
-    assert.ok(checkoutRes.data.data.transaction.final_amount_idr < 129000)
-
-    // Still locked before Admin verifies payment
-    const stillLocked = await request(`/events/${freeEventId}/modules/finance`, {
-      method: 'PATCH',
-      token: 'demo-token-organizer',
-      body: { is_enabled: true }
-    })
-    assert.equal(stillLocked.status, 403)
-
-    // Admin verifies payment as Paid -> event upgrades to PRO and Finance unlocks!
-    const verifyRes = await request(`/admin/billing/transactions/${txId}/verify`, {
-      method: 'POST',
-      token: 'demo-token-admin',
-      body: { status: 'Paid', admin_notes: 'Transfer terverifikasi via WA' }
-    })
-    assert.equal(verifyRes.status, 200)
-    assert.equal(verifyRes.data.data.status, 'Paid')
-
-    const unlockRes = await request(`/events/${freeEventId}/modules/finance`, {
-      method: 'PATCH',
-      token: 'demo-token-organizer',
-      body: { is_enabled: true }
-    })
-    assert.equal(unlockRes.status, 200)
-
-    // Admin can still create new Organizer directly
-    const createOrgUserRes = await request('/admin/organizers', {
-      method: 'POST',
-      token: 'demo-token-admin',
-      body: {
-        full_name: 'Sinta EO',
-        organization_name: 'Sinta Event Lab',
-        email: 'sinta@eo.id',
-        phone: '087897192601',
-        password: 'password123',
-        plan: 'pro_monthly',
-        duration_days: 30
-      }
-    })
-    assert.equal(createOrgUserRes.status, 201)
+    assert.equal(unlockFinance.status, 200)
   })
 
   it('supports complete organizer CRUD for Finance, Sponsors, Vendors, Participants, and Surveys', async () => {
@@ -1120,35 +1111,25 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       assert.equal(expWebhook.data.data.order_status, 'Cancelled')
       assert.equal(store.ticketTypes.find((t) => t.id === 'tkt-vip-1').sold_quantity, vipBefore)
 
-      // 8. Organizer billing checkout + Midtrans settlement webhook auto-unlocks Pro event modules
-      const freeEventRes = await request('/events', {
+      // 8. Organizer subscription checkout + force_new payment method cancel/switch + Midtrans settlement webhook
+      const billingCheckout = await request('/billing/subscribe', {
         method: 'POST',
         token: 'demo-token-organizer',
-        body: {
-          organization_id: 'org-1',
-          title: 'Midtrans Billing Test Event',
-          start_at: '2026-10-10',
-          end_at: '2026-10-11'
-        }
-      })
-      assert.equal(freeEventRes.status, 201)
-      const targetEventId = freeEventRes.data.data.id
-
-      const billingCheckout = await request('/billing/checkout', {
-        method: 'POST',
-        token: 'demo-token-organizer',
-        body: {
-          organization_id: 'org-1',
-          event_id: targetEventId,
-          plan_code: 'pro',
-          promo_code: 'EARLY100',
-          payment_method: 'payment_gateway'
-        }
+        body: {}
       })
       assert.equal(billingCheckout.status, 201)
       const tx = billingCheckout.data.data.transaction
       assert.equal(tx.status, 'Pending')
+      assert.equal(tx.final_amount_idr, 50000)
       assert.ok(billingCheckout.data.data.payment.snap_token)
+
+      const switchedSnap = await request(`/payments/billing/${tx.id}/snap-token`, {
+        method: 'POST',
+        token: 'demo-token-organizer',
+        body: { force_new: true }
+      })
+      assert.equal(switchedSnap.status, 200)
+      assert.ok(switchedSnap.data.data.midtrans_order_id.includes('-R'))
 
       const invGrossStr = `${Number(tx.final_amount_idr)}.00`
       const invSig = computeMidtransSignature({
@@ -1172,13 +1153,6 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       assert.equal(invSettle.status, 200)
       assert.equal(invSettle.data.data.target_type, 'billing_transaction')
       assert.equal(invSettle.data.data.status, 'Paid')
-
-      const unlockRes = await request(`/events/${targetEventId}/modules/finance`, {
-        method: 'PATCH',
-        token: 'demo-token-organizer',
-        body: { is_enabled: true }
-      })
-      assert.equal(unlockRes.status, 200)
     } finally {
       globalThis.fetch = originalFetch
       env.midtransServerKey = prevServerKey

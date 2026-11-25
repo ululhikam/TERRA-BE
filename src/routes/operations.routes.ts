@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { env } from '../config/env.js'
 import { requireAuth } from '../middleware/auth.middleware.js'
 import {
+  requireActiveSubscription,
   requireEventPermission,
   requireOrganizerOrAdmin,
   requireResourceEventAccess
@@ -24,6 +25,11 @@ import * as db from '../repositories/db.js'
 import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
+
+router.use('/events', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/finance', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/vendors', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/sponsors', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
 
 // ---------------- FINANCE (With Automated Paid Ticket Revenue) ----------------
 router.get('/events/:id/finance/summary', requireAuth, requireOrganizerOrAdmin, requireEventModule('finance'), requireEventPermission('View Finance'), asyncHandler(async (req, res) => {

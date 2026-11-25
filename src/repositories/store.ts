@@ -815,229 +815,70 @@ class BackendStore {
 
     this.pricingPlans = [
       {
-        id: 'plan-free',
-        code: 'free',
-        name: 'FREE',
-        tagline: 'Mulai Gratis Tanpa Kartu Kredit',
-        description: 'Untuk pengguna pemula, organisasi mahasiswa, dan komunitas kecil.',
-        price_idr: 0,
-        billing_model: 'per_event',
-        is_popular: false,
+        id: 'plan-monthly-50k',
+        code: 'monthly_50k',
+        name: 'TERRA Studio Subscribe',
+        tagline: 'Langganan Bulanan All-Access 13 Modul',
+        description:
+          'Akses penuh seluruh fitur Event Organizer, 13 modul manajemen kepanitiaan, tiket QR otomatis, dan Live Gate Scanner tanpa batas jumlah event.',
+        price_idr: 50000,
+        billing_model: 'monthly_subscription',
+        duration_days: 30,
+        is_popular: true,
         is_active: true,
         sort_order: 1,
-        max_active_events: 1,
-        max_participants: 100,
-        max_team_members: 3,
-        max_storage_mb: 50,
-        allowed_modules: ['event_profile', 'timeline', 'team'],
+        max_active_events: 999999,
+        max_participants: 999999,
+        max_team_members: 999999,
+        max_storage_mb: 10240,
+        allowed_modules: [
+          'event_profile',
+          'timeline',
+          'tasks',
+          'team',
+          'ticketing',
+          'participants',
+          'check_in',
+          'finance',
+          'vendors',
+          'sponsors',
+          'documents',
+          'feedback',
+          'reports'
+        ],
         features: [
-          '1 event aktif gratis',
-          'Event profile & landing page',
-          'Basic timeline dan rundown',
-          'Basic team management (maks 3 panitia)',
-          'Registrasi peserta maksimal 100 orang',
-          'Marketplace listing standar'
+          'Unlimited event aktif selama 30 hari masa langganan',
+          'Seluruh 13 modul manajemen kepanitiaan terbuka penuh',
+          'Penjualan tiket gratis & berbayar otomatis via Midtrans',
+          'E-Ticket QR Code & PDF otomatis ke email peserta',
+          'Fullscreen Live QR Gate Scanner & ekspor data peserta',
+          'Manajemen Tim Panitia, Timeline WBS, Kanban & Keuangan RAB'
         ],
         trial_days: 0,
         early_access_price_idr: null,
-        early_access_limit: 100,
+        early_access_limit: 0,
         community_discount_pct: 0,
-        allow_downgrade: true
-      },
-      {
-        id: 'plan-starter',
-        code: 'starter',
-        name: 'STARTER',
-        tagline: 'Tiket QR & Check-in Praktis',
-        description: 'Untuk event kecil hingga menengah seperti seminar, workshop, dan meetup kampus.',
-        price_idr: 49000,
-        billing_model: 'per_event',
-        is_popular: false,
-        is_active: true,
-        sort_order: 2,
-        max_active_events: 50,
-        max_participants: 500,
-        max_team_members: 10,
-        max_storage_mb: 250,
-        allowed_modules: [
-          'event_profile',
-          'timeline',
-          'tasks',
-          'team',
-          'ticketing',
-          'participants',
-          'check_in',
-          'documents',
-          'reports'
-        ],
-        features: [
-          'Semua fitur Free',
-          'Maksimal 500 peserta per event',
-          'Ticketing & QR Ticket otomatis via email',
-          'Participant & Check-in scanner gate',
-          'Task & Document management',
-          'Participant reports & basic branding'
-        ],
-        trial_days: 0,
-        early_access_price_idr: 39000,
-        early_access_limit: 100,
-        community_discount_pct: 20,
-        allow_downgrade: true
-      },
-      {
-        id: 'plan-pro',
-        code: 'pro',
-        name: 'PRO',
-        tagline: 'Paling Populer • All-in-One Studio',
-        description: 'Untuk event profesional dan organisasi yang membutuhkan pengelolaan lengkap.',
-        price_idr: 129000,
-        billing_model: 'per_event',
-        is_popular: true,
-        is_active: true,
-        sort_order: 3,
-        max_active_events: 100,
-        max_participants: 2000,
-        max_team_members: 25,
-        max_storage_mb: 1024,
-        allowed_modules: [
-          'event_profile',
-          'timeline',
-          'tasks',
-          'team',
-          'ticketing',
-          'participants',
-          'check_in',
-          'finance',
-          'vendors',
-          'sponsors',
-          'documents',
-          'feedback',
-          'reports'
-        ],
-        features: [
-          'Semua fitur Starter',
-          'Maksimal 2.000 peserta per event',
-          'Seluruh 13 modul manajemen event terbuka',
-          'Finance, budgeting & pencatatan kas otomatis',
-          'Vendor, Sponsor, Survey & Feedback',
-          'Advanced analytics, complete reporting & priority support'
-        ],
-        trial_days: 14,
-        early_access_price_idr: 99000,
-        early_access_limit: 100,
-        community_discount_pct: 25,
-        allow_downgrade: true
-      },
-      {
-        id: 'plan-ultimate',
-        code: 'ultimate',
-        name: 'ULTIMATE',
-        tagline: 'Skala Festival & Konferensi Besar',
-        description: 'Untuk festival, konferensi nasional, konser, dan event korporasi berskala besar.',
-        price_idr: 299000,
-        billing_model: 'per_event',
-        is_popular: false,
-        is_active: true,
-        sort_order: 4,
-        max_active_events: 999,
-        max_participants: 10000,
-        max_team_members: 100,
-        max_storage_mb: 5120,
-        allowed_modules: [
-          'event_profile',
-          'timeline',
-          'tasks',
-          'team',
-          'ticketing',
-          'participants',
-          'check_in',
-          'finance',
-          'vendors',
-          'sponsors',
-          'documents',
-          'feedback',
-          'reports'
-        ],
-        features: [
-          'Semua fitur Pro tanpa kompromi',
-          'Maksimal 10.000 peserta per event',
-          'Multi-team & granular role permission',
-          'Complete data export & advanced customization',
-          'Dedicated event support via WhatsApp & tim TERRA'
-        ],
-        trial_days: 0,
-        early_access_price_idr: 249000,
-        early_access_limit: 100,
-        community_discount_pct: 20,
-        allow_downgrade: true
+        allow_downgrade: false
       }
     ]
 
-    this.bundlePackages = [
-      {
-        id: 'bnd-pro-3',
-        code: 'bundle-3-pro',
-        name: '3 Event PRO Bundle',
-        plan_code: 'pro',
-        event_quota: 3,
-        bundle_price_idr: 299000,
-        description: 'Hemat Rp 88.000! Aktifkan paket PRO penuh untuk 3 event berbeda kapan saja.',
-        is_active: true
-      },
-      {
-        id: 'bnd-starter-3',
-        code: 'bundle-3-starter',
-        name: '3 Event STARTER Bundle',
-        plan_code: 'starter',
-        event_quota: 3,
-        bundle_price_idr: 119000,
-        description: 'Paket hemat organisasi & himpunan mahasiswa untuk 3 agenda event per tahun.',
-        is_active: true
-      }
-    ]
+    this.bundlePackages = []
 
-    this.promoCodes = [
-      {
-        id: 'prm-early',
-        code: 'EARLY100',
-        name: 'Early Access 100 Organizer Pertama',
-        promo_type: 'early_access',
-        discount_type: 'percent',
-        discount_value: 20,
-        applies_to_plan: null,
-        requires_verification: false,
-        max_redemptions: 100,
-        used_count: 12,
-        is_active: true
-      },
-      {
-        id: 'prm-community',
-        code: 'BEMUKM25',
-        name: 'Diskon Komunitas, BEM & UKM Mahasiswa',
-        promo_type: 'community',
-        discount_type: 'percent',
-        discount_value: 25,
-        applies_to_plan: null,
-        requires_verification: true,
-        max_redemptions: null,
-        used_count: 5,
-        is_active: true
-      }
-    ]
+    this.promoCodes = []
 
     this.eventSubscriptions = [
       {
         id: 'sub-evt-1',
         event_id: 'evt-1',
         organization_id: 'org-1',
-        plan_code: 'pro',
-        plan_name: 'PRO',
-        price_snapshot_idr: 129000,
+        plan_code: 'monthly_50k',
+        plan_name: 'TERRA Studio Subscribe',
+        price_snapshot_idr: 50000,
         limits_snapshot: {
-          max_active_events: 100,
-          max_participants: 2000,
-          max_team_members: 25,
-          max_storage_mb: 1024,
+          max_active_events: 999999,
+          max_participants: 999999,
+          max_team_members: 999999,
+          max_storage_mb: 10240,
           allowed_modules: [
             'event_profile',
             'timeline',

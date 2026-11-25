@@ -54,6 +54,16 @@ router.post(
   })
 )
 
+router.post(
+  '/payments/billing/:txId/cancel',
+  requireAuth,
+  requireOrganizerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const result = await paymentOrchestrator.cancelBillingMidtransSession(req.params.txId, req.user)
+    return sendSuccess(res, result, 'Sesi metode pembayaran Midtrans sebelumnya dibatalkan.')
+  })
+)
+
 // Midtrans Server-to-Server Webhook (Verified via SHA-512 signature_key)
 router.post(
   '/payments/midtrans/webhook',

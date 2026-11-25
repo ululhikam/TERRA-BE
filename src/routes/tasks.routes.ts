@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
 import {
+  requireActiveSubscription,
   requireEventPermission,
   requireOrganizerOrAdmin,
   requireResourceEventAccess
@@ -13,6 +14,10 @@ import * as pricingDb from '../repositories/pricing.db.js'
 import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
+
+router.use('/events', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/schedules', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/tasks', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
 
 async function assertTimelineOrTasksModule(eventId) {
   const evt = await db.getEventOrThrow(eventId)

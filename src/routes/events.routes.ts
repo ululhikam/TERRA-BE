@@ -1,7 +1,12 @@
 import { Router } from 'express'
 import { env } from '../config/env.js'
 import { requireAuth } from '../middleware/auth.middleware.js'
-import { requireEventPermission, requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
+import {
+  requireActiveSubscription,
+  requireDirectOrganizerSubscription,
+  requireEventPermission,
+  requireOrganizerOrAdmin
+} from '../middleware/role.middleware.js'
 import { requireEventModule } from '../middleware/module.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
 import {
@@ -19,13 +24,15 @@ import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
 
+router.use('/events', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+
 router.get('/events', requireAuth, requireOrganizerOrAdmin, asyncHandler(async (req, res) => {
   const { organization_id, status } = req.query
   const list = await db.listEventsForUser(req.user, { organization_id, status })
   return sendSuccess(res, list)
 }))
 
-router.post('/events', requireAuth, requireOrganizerOrAdmin, validateBody(eventCreateSchema), asyncHandler(async (req, res) => {
+router.post('/events', requireAuth, requireOrganizerOrAdmin, requireDirectOrganizerSubscription, validateBody(eventCreateSchema), asyncHandler(async (req, res) => {
   if (req.user.role !== 'admin') {
     const { allowed } = await db.isOrgMember(req.validatedBody.organization_id, req.user)
     if (!allowed) {

@@ -116,10 +116,23 @@ export async function upsertUser(payload) {
 
   if (!usePrisma()) {
     const idx = store.users.findIndex(
-      (u) => u.id === payload.id || u.email?.toLowerCase() === payload.email?.toLowerCase()
+      (u) =>
+        (!payload.role || u.role === targetRole) &&
+        (u.id === payload.id || (payload.email && u.email?.toLowerCase() === payload.email?.toLowerCase()))
     )
     if (idx === -1) {
-      const next = { ...payload, role: targetRole }
+      const next = {
+        ...payload,
+        role: targetRole,
+        ...(targetRole === 'organizer'
+          ? {
+              subscription_plan: payload.subscription_plan ?? 'unsubscribed',
+              subscription_status: payload.subscription_status ?? 'unpaid',
+              subscription_expires_at:
+                payload.subscription_expires_at !== undefined ? payload.subscription_expires_at : null
+            }
+          : {})
+      }
       store.users.push(next)
       return next
     }
@@ -184,12 +197,12 @@ export async function upsertUser(payload) {
       is_suspended: Boolean(payload.is_suspended),
       ...(targetRole === 'organizer'
         ? {
-            subscription_plan: payload.subscription_plan || 'free_trial',
-            subscription_status: payload.subscription_status || 'trialing',
+            subscription_plan: payload.subscription_plan || 'unsubscribed',
+            subscription_status: payload.subscription_status || 'unpaid',
             subscription_expires_at:
               payload.subscription_expires_at !== undefined
                 ? payload.subscription_expires_at
-                : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+                : null
           }
         : {})
     }
@@ -3617,29 +3630,142 @@ export function evaluateOrganizerSubscription(organizer) {
       is_active: true,
       plan: 'unlimited',
       status: 'active',
+      price_idr: 50000,
       expires_at: null,
       days_remaining: null
     }
   }
 
-  const plan = organizer.subscription_plan || 'free_trial'
-  const rawStatus = organizer.subscription_status || 'trialing'
+  const plan = organizer.subscription_plan || 'unsubscribed'
+  const rawStatus = organizer.subscription_status || 'unpaid'
   const expiresAt = organizer.subscription_expires_at ? new Date(organizer.subscription_expires_at) : null
   const now = Date.now()
-  const msLeft = expiresAt ? expiresAt.getTime() - now : 30 * 24 * 60 * 60 * 1000
-  const daysRemaining = Math.max(0, Math.ceil(msLeft / (24 * 60 * 60 * 1000)))
+  const msLeft = expiresAt
+    ? expiresAt.getTime() - now
+    : rawStatus === 'active'
+      ? 30 * 24 * 60 * 60 * 1000
+      : 0
+  const daysRemaining = msLeft > 0 ? Math.max(1, Math.ceil(msLeft / (24 * 60 * 60 * 1000))) : 0
 
-  const notExpired = !expiresAt || msLeft > 0
-  const statusAllows = rawStatus === 'active' || rawStatus === 'trialing'
-  const isActive = Boolean(statusAllows && notExpired && !organizer.is_suspended)
+  const isActive = Boolean(rawStatus === 'active' && msLeft > 0 && !organizer.is_suspended)
 
   return {
     is_active: isActive,
-    plan,
-    status: isActive ? rawStatus : rawStatus === 'unpaid' ? 'unpaid' : 'expired',
+    plan: isActive ? plan : 'unsubscribed',
+    status: isActive ? 'active' : rawStatus === 'unpaid' ? 'unpaid' : 'expired',
+    price_idr: 50000,
     expires_at: expiresAt ? expiresAt.toISOString() : null,
     days_remaining: isActive ? daysRemaining : 0
   }
+}
+
+export async function hasActiveOrganizerOrTeamAccess(user) {
+  if (!user) return false
+  if (user.role !== 'organizer') return true
+
+  const fresh = (await findUserById(user.id, 'organizer')) || user
+  if (evaluateOrganizerSubscription(fresh).is_active) return true
+
+  if (!usePrisma()) {
+    const memberships = store.teamMembers.filter(
+      (m) =>
+        m.status === 'Active' &&
+        (m.user_id === user.id || (user.email && m.email?.toLowerCase() === user.email.toLowerCase()))
+    )
+    for (const member of memberships) {
+      const evt = store.events.find((e) => e.id === member.event_id && !e.deleted_at)
+      if (!evt) continue
+      const org = store.organizations.find((o) => o.id === evt.organization_id)
+      const owner = org?.created_by ? store.users.find((u) => u.id === org.created_by) : null
+      if (owner && evaluateOrganizerSubscription(owner).is_active) {
+        return true
+      }
+    }
+    return false
+  }
+
+  const teamRows = await prisma.teamMember.findMany({
+    where: {
+      status: 'Active',
+      OR: [
+        ...(user.id ? [{ user_id: user.id }] : []),
+        ...(user.email ? [{ email: { equals: user.email, mode: 'insensitive' } }] : [])
+      ]
+    },
+    include: {
+      event: {
+        include: {
+          organization: {
+            include: { creator: true }
+          }
+        }
+      }
+    }
+  })
+
+  for (const row of teamRows) {
+    if (!row.event || row.event.deleted_at) continue
+    const creator = row.event.organization?.creator
+    if (creator && evaluateOrganizerSubscription({ ...creator, role: 'organizer' }).is_active) {
+      return true
+    }
+  }
+  return false
+}
+
+export async function activateOrganizerMonthlySubscription(organizerId: string, durationDays = 30) {
+  if (!organizerId) return null
+  const days = Math.max(1, Number(durationDays || 30))
+
+  if (!usePrisma()) {
+    const user = store.users.find((u) => u.id === organizerId && u.role === 'organizer')
+    if (!user) return null
+    const baseMs =
+      user.subscription_expires_at && new Date(user.subscription_expires_at).getTime() > Date.now()
+        ? new Date(user.subscription_expires_at).getTime()
+        : Date.now()
+    const nextExpires = new Date(baseMs + days * 24 * 60 * 60 * 1000).toISOString()
+    user.subscription_plan = 'monthly_50k'
+    user.subscription_status = 'active'
+    user.subscription_expires_at = nextExpires
+    return user
+  }
+
+  const existing = await prisma.organizer.findUnique({ where: { id: organizerId } })
+  if (!existing) return null
+  const baseMs =
+    existing.subscription_expires_at && new Date(existing.subscription_expires_at).getTime() > Date.now()
+      ? new Date(existing.subscription_expires_at).getTime()
+      : Date.now()
+  const nextExpires = new Date(baseMs + days * 24 * 60 * 60 * 1000)
+  const updated = await prisma.organizer.update({
+    where: { id: organizerId },
+    data: {
+      subscription_plan: 'monthly_50k',
+      subscription_status: 'active',
+      subscription_expires_at: nextExpires
+    }
+  })
+  return { ...updated, role: 'organizer' }
+}
+
+export async function ensureOrganizerDefaultOrganization(user, preferredName = '') {
+  const existingOrgs = await listOrganizationsForUser(user)
+  if (existingOrgs.length > 0) return existingOrgs[0]
+
+  const orgTitle =
+    String(preferredName || '').trim() ||
+    `${String(user.full_name || user.email?.split('@')[0] || 'TERRA').trim()} Studio`
+
+  return createOrganization(
+    {
+      name: orgTitle,
+      description: `Organisasi penyelenggara event ${orgTitle}.`,
+      email: user.email,
+      website: 'https://terra.concern.web.id'
+    },
+    user
+  )
 }
 
 export async function listAdminUsers() {

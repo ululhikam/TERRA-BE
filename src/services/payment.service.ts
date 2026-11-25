@@ -300,3 +300,38 @@ export async function fetchMidtransTransactionStatus(midtransOrderId: string) {
 
   return data
 }
+
+export async function cancelMidtransTransaction(midtransOrderId: string) {
+  if (!isMidtransConfigured() || !midtransOrderId) {
+    return { cancelled: false, skipped: true }
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${getCoreApiBaseUrl()}/${encodeURIComponent(midtransOrderId)}/cancel`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: buildBasicAuthHeader()
+      },
+      signal: AbortSignal.timeout(12000)
+    })
+  } catch {
+    return { cancelled: false, unreachable: true }
+  }
+
+  const data: any = await response.json().catch(() => ({}))
+  const statusCode = String(data?.status_code || '')
+  const txStatus = String(data?.transaction_status || '').toLowerCase()
+
+  if (txStatus === 'settlement' || txStatus === 'capture') {
+    throw new AppError('Pembayaran sudah berhasil diselesaikan di Midtrans.', 409, 'PAYMENT_ALREADY_SETTLED')
+  }
+
+  if (response.status === 404 || statusCode === '404' || statusCode === '412') {
+    return { cancelled: false, not_found_or_closed: true, data }
+  }
+
+  return { cancelled: response.ok || txStatus === 'cancel', data }
+}

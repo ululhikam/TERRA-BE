@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
 import {
+  requireActiveSubscription,
   requireEventPermission,
   requireOrganizerOrAdmin,
   requireResourceEventAccess
@@ -12,6 +13,9 @@ import * as db from '../repositories/db.js'
 import { AppError, sendSuccess, asyncHandler } from '../utils/response.js'
 
 const router = Router()
+
+router.use('/events', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/participants', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
 
 function csvCell(val) {
   let str = String(val ?? '')

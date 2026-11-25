@@ -1,6 +1,11 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
-import { requireOrganizerOrAdmin, requireOrgMembership, requireOrgRole } from '../middleware/role.middleware.js'
+import {
+  requireDirectOrganizerSubscription,
+  requireOrganizerOrAdmin,
+  requireOrgMembership,
+  requireOrgRole
+} from '../middleware/role.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
 import {
   organizationCreateSchema,
@@ -18,42 +23,42 @@ router.get('/organizations', requireAuth, requireOrganizerOrAdmin, asyncHandler(
   return sendSuccess(res, list)
 }))
 
-router.post('/organizations', requireAuth, requireOrganizerOrAdmin, validateBody(organizationCreateSchema), asyncHandler(async (req, res) => {
+router.post('/organizations', requireAuth, requireOrganizerOrAdmin, requireDirectOrganizerSubscription, validateBody(organizationCreateSchema), asyncHandler(async (req, res) => {
   const org = await db.createOrganization(req.validatedBody, req.user)
   return sendSuccess(res, org, 'Organisasi berhasil dibuat.', 201)
 }))
 
-router.get('/organizations/:id', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+router.get('/organizations/:id', requireAuth, requireDirectOrganizerSubscription, requireOrgMembership, asyncHandler(async (req, res) => {
   const org = await db.findOrganizationById(req.params.id)
   return sendSuccess(res, org)
 }))
 
-router.patch('/organizations/:id', requireAuth, requireOrgRole('Owner', 'Admin'), validateBody(organizationUpdateSchema), asyncHandler(async (req, res) => {
+router.patch('/organizations/:id', requireAuth, requireDirectOrganizerSubscription, requireOrgRole('Owner', 'Admin'), validateBody(organizationUpdateSchema), asyncHandler(async (req, res) => {
   const org = await db.updateOrganization(req.params.id, req.validatedBody, req.user.id)
   return sendSuccess(res, org, 'Organisasi diperbarui.')
 }))
 
-router.delete('/organizations/:id', requireAuth, requireOrgRole('Owner'), asyncHandler(async (req, res) => {
+router.delete('/organizations/:id', requireAuth, requireDirectOrganizerSubscription, requireOrgRole('Owner'), asyncHandler(async (req, res) => {
   const result = await db.deleteOrganization(req.params.id)
   return sendSuccess(res, result, 'Organisasi dihapus.')
 }))
 
-router.post('/organizations/:id/verification', requireAuth, requireOrgRole('Owner', 'Admin'), asyncHandler(async (req, res) => {
+router.post('/organizations/:id/verification', requireAuth, requireDirectOrganizerSubscription, requireOrgRole('Owner', 'Admin'), asyncHandler(async (req, res) => {
   const ver = await db.createOrgVerification(req.params.id, req.user.id, req.body?.documents || [])
   return sendSuccess(res, ver, 'Pengajuan verifikasi dikirim ke Admin.', 201)
 }))
 
-router.get('/organizations/:id/activity-logs', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+router.get('/organizations/:id/activity-logs', requireAuth, requireDirectOrganizerSubscription, requireOrgMembership, asyncHandler(async (req, res) => {
   const logs = await db.listOrganizationActivityLogs(req.params.id)
   return sendSuccess(res, logs)
 }))
 
-router.get('/organizations/:id/members', requireAuth, requireOrgMembership, asyncHandler(async (req, res) => {
+router.get('/organizations/:id/members', requireAuth, requireDirectOrganizerSubscription, requireOrgMembership, asyncHandler(async (req, res) => {
   const org = await db.findOrganizationById(req.params.id)
   return sendSuccess(res, org.members || [])
 }))
 
-router.post('/organizations/:id/members', requireAuth, requireOrgRole('Owner', 'Admin'), validateBody(organizationMemberSchema), asyncHandler(async (req, res) => {
+router.post('/organizations/:id/members', requireAuth, requireDirectOrganizerSubscription, requireOrgRole('Owner', 'Admin'), validateBody(organizationMemberSchema), asyncHandler(async (req, res) => {
   const member = await db.addOrganizationMember(req.params.id, req.validatedBody)
   return sendSuccess(res, member, 'Anggota organisasi ditambahkan.', 201)
 }))

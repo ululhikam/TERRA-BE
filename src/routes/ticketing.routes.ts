@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { requireAuth, optionalAuth } from '../middleware/auth.middleware.js'
 import {
   getUserEventPermissions,
+  requireActiveSubscription,
   requireEventPermission,
   requireOrganizerOrAdmin,
   requireResourceEventAccess
@@ -23,6 +24,9 @@ import { verifyEmailPreviewToken } from '../utils/qrcode.js'
 import { sendSuccess, AppError, asyncHandler } from '../utils/response.js'
 
 const router = Router()
+
+router.use('/events', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
+router.use('/ticket-types', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription)
 
 // Ticket Types Management
 router.get('/events/:id/ticket-types', requireAuth, requireOrganizerOrAdmin, requireEventModule('ticketing'), requireEventPermission('View Event'), asyncHandler(async (req, res) => {
@@ -248,7 +252,7 @@ async function assertTicketCheckinPermission(user, code, explicitEventId = null)
   }
 }
 
-router.post('/tickets/validate', requireAuth, requireOrganizerOrAdmin, validateBody(checkinSchema), asyncHandler(async (req, res) => {
+router.post('/tickets/validate', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription, validateBody(checkinSchema), asyncHandler(async (req, res) => {
   await assertTicketCheckinPermission(req.user, req.validatedBody.code, req.validatedBody.event_id || null)
   const result = await db.validateOrCheckIn(
     req.validatedBody.code,
@@ -264,7 +268,7 @@ router.get('/events/:id/check-ins', requireAuth, requireOrganizerOrAdmin, requir
   return sendSuccess(res, await db.listCheckins(req.params.id))
 }))
 
-router.post('/tickets/check-in', requireAuth, requireOrganizerOrAdmin, validateBody(checkinSchema), asyncHandler(async (req, res) => {
+router.post('/tickets/check-in', requireAuth, requireOrganizerOrAdmin, requireActiveSubscription, validateBody(checkinSchema), asyncHandler(async (req, res) => {
   await assertTicketCheckinPermission(req.user, req.validatedBody.code, req.validatedBody.event_id || null)
   const result = await db.validateOrCheckIn(
     req.validatedBody.code,

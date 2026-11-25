@@ -4,6 +4,7 @@ import * as pricingDb from '../repositories/pricing.db.js'
 import * as ticketingService from './ticketing.service.js'
 import {
   buildRetryMidtransOrderId,
+  cancelMidtransTransaction,
   createMidtransSnapTransaction,
   extractBaseOrderReference,
   fetchMidtransTransactionStatus,
@@ -48,6 +49,14 @@ export async function createOrGetOrderSnapSession(orderId: string, user: any, { 
       redirect_url: order.payment_redirect_url || '',
       midtrans_order_id: order.payment_metadata?.midtrans_order_id || order.order_number,
       gross_amount: Math.round(Number(order.total))
+    }
+  }
+
+  if (forceNew) {
+    const prevMidtransOrderId =
+      order.payment_metadata?.midtrans_order_id || (cachedToken ? order.order_number : null)
+    if (prevMidtransOrderId && isMidtransConfigured()) {
+      await cancelMidtransTransaction(prevMidtransOrderId)
     }
   }
 
@@ -124,21 +133,27 @@ export async function createOrGetBillingSnapSession(txId: string, user: any, { f
     }
   }
 
+  if (forceNew) {
+    const prevMidtransOrderId =
+      txRecord.payment_metadata?.midtrans_order_id || (cachedToken ? txRecord.invoice_number : null)
+    if (prevMidtransOrderId && isMidtransConfigured()) {
+      await cancelMidtransTransaction(prevMidtransOrderId)
+    }
+  }
+
   const midtransOrderId =
     cachedToken || forceNew || txRecord.status !== 'Pending'
       ? buildRetryMidtransOrderId(txRecord.invoice_number)
       : txRecord.invoice_number
 
-  const returnPath = txRecord.event_id
-    ? `/dashboard/events/${txRecord.event_id}/billing?invoice=${encodeURIComponent(txRecord.invoice_number)}`
-    : `/dashboard/billing-history?invoice=${encodeURIComponent(txRecord.invoice_number)}`
+  const returnPath = `/dashboard/billing?invoice=${encodeURIComponent(txRecord.invoice_number)}`
 
   const snap = await createMidtransSnapTransaction({
     midtransOrderId,
     grossAmount: Number(txRecord.final_amount_idr),
     itemDetails: [
       {
-        id: String(txRecord.plan_code || txRecord.target_type || 'plan').slice(0, 50),
+        id: String(txRecord.plan_code || txRecord.target_type || 'monthly_50k').slice(0, 50),
         price: Math.round(Number(txRecord.final_amount_idr)),
         quantity: 1,
         name: `TERRA ${txRecord.plan_name}`.slice(0, 50)
@@ -154,6 +169,7 @@ export async function createOrGetBillingSnapSession(txId: string, user: any, { f
   })
 
   await pricingDb.updateBillingPaymentSession(txRecord.id, {
+    ...(txRecord.status === 'Expired' || forceNew ? { status: 'Pending' } : {}),
     payment_provider: 'midtrans',
     payment_method: 'payment_gateway',
     payment_token: snap.token,
@@ -258,18 +274,40 @@ export async function syncBillingWithMidtrans(txId: string, user: any) {
   const txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(txId)
   await ensureBillingAccess(txRecord, user)
 
+  const readOrgSub = async () => {
+    const orgUser = await db.findUserById(txRecord.organizer_id, 'organizer').catch(() => null)
+    return orgUser ? db.evaluateOrganizerSubscription(orgUser) : null
+  }
+
   if (txRecord.status === 'Paid') {
     const entitlement = txRecord.event_id ? await pricingDb.ensureEventEntitlement(txRecord.event_id).catch(() => null) : null
-    return { payment_state: 'settled', already_settled: true, transaction: txRecord, entitlement }
+    return {
+      payment_state: 'settled',
+      already_settled: true,
+      transaction: txRecord,
+      entitlement,
+      subscription: await readOrgSub()
+    }
   }
   if (!isMidtransConfigured()) {
-    return { payment_state: 'pending', configured: false, transaction: txRecord, entitlement: null }
+    return {
+      payment_state: 'pending',
+      configured: false,
+      transaction: txRecord,
+      entitlement: null,
+      subscription: await readOrgSub()
+    }
   }
 
   const midtransOrderId = txRecord.payment_metadata?.midtrans_order_id || txRecord.invoice_number
   const statusPayload = await fetchMidtransTransactionStatus(midtransOrderId)
   if (statusPayload?.not_yet_submitted) {
-    return { payment_state: 'pending', transaction: txRecord, entitlement: null }
+    return {
+      payment_state: 'pending',
+      transaction: txRecord,
+      entitlement: null,
+      subscription: await readOrgSub()
+    }
   }
 
   const state = mapMidtransTransactionState(statusPayload)
@@ -282,8 +320,25 @@ export async function syncBillingWithMidtrans(txId: string, user: any) {
     payment_state: state,
     already_settled: settled.alreadySettled,
     transaction: settled.transaction,
-    entitlement
+    entitlement,
+    subscription: await readOrgSub()
   }
+}
+
+export async function cancelBillingMidtransSession(txId: string, user: any) {
+  const txRecord = await pricingDb.findBillingTransactionByIdOrInvoice(txId)
+  await ensureBillingAccess(txRecord, user)
+  if (txRecord.status === 'Paid') {
+    throw new AppError('Invoice billing ini sudah lunas dan tidak dapat dibatalkan.', 409, 'TX_ALREADY_PAID')
+  }
+  const midtransOrderId = txRecord.payment_metadata?.midtrans_order_id || txRecord.invoice_number
+  const cancelRes = await cancelMidtransTransaction(midtransOrderId)
+  const updated = await pricingDb.updateBillingPaymentSession(txRecord.id, {
+    payment_token: null,
+    payment_redirect_url: null,
+    payment_metadata: { last_cancelled_order_id: midtransOrderId }
+  })
+  return { cancelled: true, midtrans: cancelRes, transaction: updated }
 }
 
 export async function processMidtransWebhook(payload: Record<string, any>) {

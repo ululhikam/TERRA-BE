@@ -26,6 +26,49 @@ export const requireAdmin = requireRole('admin')
 
 export const requireOrganizerOrAdmin = requireRole('organizer', 'admin')
 
+export async function requireActiveSubscription(req: Request, _res: Response, next: NextFunction) {
+  try {
+    if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
+    if (req.user.role !== 'organizer') return next()
+
+    const allowed = await db.hasActiveOrganizerOrTeamAccess(req.user)
+    if (!allowed) {
+      return next(
+        new AppError(
+          'Akun Organizer belum berlangganan. Silakan aktifkan paket Rp 50.000/bulan melalui Midtrans di tab Pricing & Langganan.',
+          403,
+          'SUBSCRIPTION_REQUIRED'
+        )
+      )
+    }
+    next()
+  } catch (err) {
+    next(err)
+  }
+}
+
+export async function requireDirectOrganizerSubscription(req: Request, _res: Response, next: NextFunction) {
+  try {
+    if (!req.user) return next(new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED'))
+    if (req.user.role !== 'organizer') return next()
+
+    const fresh = (await db.findUserById(req.user.id, 'organizer')) || req.user
+    const sub = db.evaluateOrganizerSubscription(fresh)
+    if (!sub.is_active) {
+      return next(
+        new AppError(
+          'Langganan Organizer (Rp 50.000/bulan) diperlukan untuk menggunakan fitur ini.',
+          403,
+          'SUBSCRIPTION_REQUIRED'
+        )
+      )
+    }
+    next()
+  } catch (err) {
+    next(err)
+  }
+}
+
 export function requireEventPermission(permissionKey: string): RequestHandler {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {

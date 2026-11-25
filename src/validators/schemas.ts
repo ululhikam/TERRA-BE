@@ -12,7 +12,7 @@ export const registerSchema = z.object({
   password: z.string().min(6),
   role: z.enum(['customer', 'organizer']).default('customer'),
   organization_name: z.string().optional().default(''),
-  plan: z.enum(['free_trial', 'pro_monthly']).optional().default('free_trial')
+  plan: z.string().optional().default('unsubscribed')
 })
 
 export const profileUpdateSchema = z.object({
@@ -404,7 +404,7 @@ export const adminUpdateSubscriptionSchema = z.object({
 })
 
 export const billingPreviewSchema = z.object({
-  plan_code: z.enum(['free', 'starter', 'pro', 'ultimate']).optional().default('starter'),
+  plan_code: z.string().optional().default('monthly_50k'),
   bundle_id: z.string().nullable().optional(),
   event_id: z.string().nullable().optional(),
   promo_code: z.string().max(40).optional().default(''),
@@ -412,10 +412,16 @@ export const billingPreviewSchema = z.object({
   is_community: z.boolean().optional().default(false)
 })
 
+export const subscribeCheckoutSchema = z.object({
+  organization_id: z.string().nullable().optional(),
+  force_new: z.boolean().optional().default(false)
+})
+
 export const billingCheckoutSchema = billingPreviewSchema.extend({
-  organization_id: z.string().min(1, 'Organisasi wajib dipilih'),
+  organization_id: z.string().optional().default(''),
   payment_method: z
-    .enum(['payment_gateway', 'midtrans_snap', 'manual_whatsapp', 'manual_transfer', 'free'])
+    .enum(['payment_gateway', 'midtrans_snap'])
+    .optional()
     .default('payment_gateway'),
   community_org_proof: z.string().max(240).optional().default(''),
   payment_notes: z.string().max(300).optional().default('')

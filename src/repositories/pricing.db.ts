@@ -7,17 +7,71 @@ import { store } from './store.js'
 const usePrisma = () => Boolean(isDatabaseConfigured && prisma)
 
 export const PLAN_RANK = {
+  unsubscribed: 0,
   free: 0,
   starter: 1,
   pro: 2,
-  ultimate: 3
+  ultimate: 3,
+  monthly_50k: 3
+}
+
+export const SUBSCRIPTION_PRICE_IDR = 50000
+export const SUBSCRIPTION_DURATION_DAYS = 30
+
+export const ALL_MODULES = [
+  'event_profile',
+  'timeline',
+  'tasks',
+  'team',
+  'ticketing',
+  'participants',
+  'check_in',
+  'finance',
+  'vendors',
+  'sponsors',
+  'documents',
+  'feedback',
+  'reports'
+]
+
+export const SINGLE_MONTHLY_PLAN = {
+  id: 'plan-monthly-50k',
+  code: 'monthly_50k',
+  name: 'TERRA Studio Subscribe',
+  tagline: 'Langganan Bulanan All-Access 13 Modul',
+  description:
+    'Akses penuh seluruh fitur Event Organizer, 13 modul manajemen kepanitiaan, tiket QR otomatis, dan Live Gate Scanner tanpa batas jumlah event.',
+  price_idr: SUBSCRIPTION_PRICE_IDR,
+  billing_model: 'monthly_subscription',
+  duration_days: SUBSCRIPTION_DURATION_DAYS,
+  is_popular: true,
+  is_active: true,
+  sort_order: 1,
+  max_active_events: 999999,
+  max_participants: 999999,
+  max_team_members: 999999,
+  max_storage_mb: 10240,
+  allowed_modules: ALL_MODULES,
+  features: [
+    'Unlimited event aktif selama 30 hari masa langganan',
+    'Seluruh 13 modul manajemen kepanitiaan terbuka penuh',
+    'Penjualan tiket gratis & berbayar otomatis via Midtrans',
+    'E-Ticket QR Code & PDF otomatis ke email peserta',
+    'Fullscreen Live QR Gate Scanner & ekspor data peserta',
+    'Manajemen Tim Panitia, Timeline WBS, Kanban & Keuangan RAB'
+  ],
+  trial_days: 0,
+  early_access_price_idr: null,
+  early_access_limit: 0,
+  community_discount_pct: 0,
+  allow_downgrade: false
 }
 
 export const MANUAL_PAYMENT_INSTRUCTIONS = {
-  bank_name: 'Bank BCA',
-  account_number: '5410-8899-2026',
-  account_holder: 'PT TERRA EKOSISTEM DIGITAL',
-  ewallet_note: 'QRIS / Transfer Bank / Konfirmasi instan melalui WhatsApp Admin TERRA'
+  bank_name: 'Midtrans Payment Gateway',
+  account_number: 'AUTO',
+  account_holder: 'TERRA Otomatis (QRIS / VA / E-Wallet / Kartu)',
+  ewallet_note: 'Aktivasi instan otomatis setelah pembayaran Midtrans berhasil'
 }
 
 function generateInvoiceNumber() {
@@ -54,45 +108,83 @@ async function recordBillingAudit(
   })
 }
 
-export async function getPlanByCode(code) {
+export async function getPlanByCode(_code?: string) {
   if (!usePrisma()) {
-    return store.pricingPlans.find((p) => p.code === code) || null
+    return store.pricingPlans[0] || SINGLE_MONTHLY_PLAN
   }
-  return prisma.pricingPlan.findUnique({ where: { code } })
+  const existing = await prisma.pricingPlan.findUnique({ where: { code: SINGLE_MONTHLY_PLAN.code } })
+  if (existing) {
+    return { ...existing, duration_days: SUBSCRIPTION_DURATION_DAYS }
+  }
+  return SINGLE_MONTHLY_PLAN
 }
 
 export async function listPublicPricingCatalog() {
   if (!usePrisma()) {
     return {
-      plans: store.pricingPlans.filter((p) => p.is_active).sort((a, b) => a.sort_order - b.sort_order),
-      bundles: store.bundlePackages.filter((b) => b.is_active),
-      promos: store.promoCodes.filter((p) => p.is_active),
-      admin_whatsapp: env.adminWhatsappNumber || '6287897192601',
-      manual_payment_instructions: MANUAL_PAYMENT_INSTRUCTIONS
+      plans: [store.pricingPlans[0] || SINGLE_MONTHLY_PLAN],
+      bundles: [],
+      promos: [],
+      payment_methods: ['midtrans_snap'],
+      manual_payment_enabled: false,
+      subscription_duration_days: SUBSCRIPTION_DURATION_DAYS
     }
   }
 
-  const [plans, bundles, promos] = await Promise.all([
-    prisma.pricingPlan.findMany({ where: { is_active: true }, orderBy: { sort_order: 'asc' } }),
-    prisma.bundlePackage.findMany({ where: { is_active: true }, orderBy: { bundle_price_idr: 'asc' } }),
-    prisma.promoCode.findMany({ where: { is_active: true }, orderBy: { created_at: 'desc' } })
-  ])
+  const upserted = await prisma.pricingPlan.upsert({
+    where: { code: SINGLE_MONTHLY_PLAN.code },
+    update: {
+      name: SINGLE_MONTHLY_PLAN.name,
+      tagline: SINGLE_MONTHLY_PLAN.tagline,
+      description: SINGLE_MONTHLY_PLAN.description,
+      price_idr: SUBSCRIPTION_PRICE_IDR,
+      billing_model: SINGLE_MONTHLY_PLAN.billing_model,
+      is_popular: true,
+      is_active: true,
+      sort_order: 1,
+      max_active_events: SINGLE_MONTHLY_PLAN.max_active_events,
+      max_participants: SINGLE_MONTHLY_PLAN.max_participants,
+      max_team_members: SINGLE_MONTHLY_PLAN.max_team_members,
+      max_storage_mb: SINGLE_MONTHLY_PLAN.max_storage_mb,
+      allowed_modules: SINGLE_MONTHLY_PLAN.allowed_modules,
+      features: SINGLE_MONTHLY_PLAN.features,
+      trial_days: 0,
+      early_access_price_idr: null,
+      early_access_limit: 0,
+      community_discount_pct: 0,
+      allow_downgrade: false
+    },
+    create: {
+      code: SINGLE_MONTHLY_PLAN.code,
+      name: SINGLE_MONTHLY_PLAN.name,
+      tagline: SINGLE_MONTHLY_PLAN.tagline,
+      description: SINGLE_MONTHLY_PLAN.description,
+      price_idr: SUBSCRIPTION_PRICE_IDR,
+      billing_model: SINGLE_MONTHLY_PLAN.billing_model,
+      is_popular: true,
+      is_active: true,
+      sort_order: 1,
+      max_active_events: SINGLE_MONTHLY_PLAN.max_active_events,
+      max_participants: SINGLE_MONTHLY_PLAN.max_participants,
+      max_team_members: SINGLE_MONTHLY_PLAN.max_team_members,
+      max_storage_mb: SINGLE_MONTHLY_PLAN.max_storage_mb,
+      allowed_modules: SINGLE_MONTHLY_PLAN.allowed_modules,
+      features: SINGLE_MONTHLY_PLAN.features,
+      trial_days: 0,
+      early_access_price_idr: null,
+      early_access_limit: 0,
+      community_discount_pct: 0,
+      allow_downgrade: false
+    }
+  })
 
   return {
-    plans,
-    bundles,
-    promos: promos.map((p) => ({
-      id: p.id,
-      code: p.code,
-      name: p.name,
-      promo_type: p.promo_type,
-      discount_type: p.discount_type,
-      discount_value: p.discount_value,
-      applies_to_plan: p.applies_to_plan,
-      requires_verification: p.requires_verification
-    })),
-    admin_whatsapp: env.adminWhatsappNumber || '6287897192601',
-    manual_payment_instructions: MANUAL_PAYMENT_INSTRUCTIONS
+    plans: [{ ...upserted, duration_days: SUBSCRIPTION_DURATION_DAYS }],
+    bundles: [],
+    promos: [],
+    payment_methods: ['midtrans_snap'],
+    manual_payment_enabled: false,
+    subscription_duration_days: SUBSCRIPTION_DURATION_DAYS
   }
 }
 
@@ -142,444 +234,127 @@ export async function getEventUsage(eventId) {
 }
 
 export async function ensureEventEntitlement(eventId) {
-  const freePlan = (await getPlanByCode('free')) || {
-    code: 'free',
-    name: 'FREE',
-    price_idr: 0,
-    max_active_events: 1,
-    max_participants: 100,
-    max_team_members: 3,
-    max_storage_mb: 50,
-    allowed_modules: ['event_profile', 'timeline', 'team']
-  }
+  const activePlan = SINGLE_MONTHLY_PLAN
 
   if (!usePrisma()) {
     const evt = store.events.find((e) => e.id === eventId && !e.deleted_at)
     if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
 
-    let sub = store.eventSubscriptions.find((s) => s.event_id === eventId)
-    if (!sub) {
-      sub = {
+    const usage = await getEventUsage(eventId)
+    return {
+      subscription: {
         id: 'sub-' + eventId,
         event_id: eventId,
         organization_id: evt.organization_id,
-        plan_code: 'free',
-        plan_name: 'FREE',
-        price_snapshot_idr: 0,
-        limits_snapshot: buildPlanSnapshot(freePlan),
+        plan_code: activePlan.code,
+        plan_name: activePlan.name,
+        price_snapshot_idr: SUBSCRIPTION_PRICE_IDR,
+        limits_snapshot: buildPlanSnapshot(activePlan),
         status: 'active',
+        is_trial: false,
+        activated_at: new Date().toISOString()
+      },
+      plan_code: activePlan.code,
+      plan_name: activePlan.name,
+      limits: buildPlanSnapshot(activePlan),
+      allowed_modules: ALL_MODULES,
+      usage,
+      trial: {
         is_trial: false,
         trial_started_at: null,
         trial_ends_at: null,
-        activated_at: new Date().toISOString()
-      }
-      store.eventSubscriptions.push(sub)
-    }
-
-    if (sub.is_trial && sub.trial_ends_at && new Date(sub.trial_ends_at).getTime() < Date.now()) {
-      sub.status = 'trial_expired'
-      sub.is_trial = false
-      sub.plan_code = 'free'
-      sub.plan_name = 'FREE'
-      sub.limits_snapshot = buildPlanSnapshot(freePlan)
-    }
-
-    const usage = await getEventUsage(eventId)
-    const trialUsedBefore = store.billingAuditLogs.some(
-      (l) => l.action === 'TRIAL_ACTIVATED' && (l.event_id === eventId || l.organization_id === evt.organization_id)
-    )
-    const daysRemaining =
-      sub.is_trial && sub.trial_ends_at
-        ? Math.max(0, Math.ceil((new Date(sub.trial_ends_at).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-        : null
-
-    return {
-      subscription: sub,
-      plan_code: sub.plan_code,
-      plan_name: sub.plan_name,
-      limits: sub.limits_snapshot || buildPlanSnapshot(freePlan),
-      allowed_modules: toArray(sub.limits_snapshot?.allowed_modules || freePlan.allowed_modules),
-      usage,
-      trial: {
-        is_trial: Boolean(sub.is_trial),
-        trial_started_at: sub.trial_started_at,
-        trial_ends_at: sub.trial_ends_at,
-        days_remaining: daysRemaining,
-        warning:
-          sub.is_trial && daysRemaining !== null && daysRemaining <= 3
-            ? `Masa Free Trial Pro berakhir dalam ${daysRemaining} hari. Upgrade paket agar fitur Pro tetap terbuka.`
-            : null,
-        eligible: !trialUsedBefore && sub.plan_code === 'free' && !sub.is_trial
+        days_remaining: null,
+        warning: null,
+        eligible: false
       }
     }
   }
 
-  const evt = await prisma.event.findFirst({ where: { id: eventId, deleted_at: null }, select: { id: true, organization_id: true, created_by: true, title: true } })
+  const evt = await prisma.event.findFirst({
+    where: { id: eventId, deleted_at: null },
+    select: { id: true, organization_id: true, created_by: true, title: true }
+  })
   if (!evt) throw new AppError('Event tidak ditemukan.', 404, 'EVENT_NOT_FOUND')
 
-  let sub = await prisma.eventSubscription.findUnique({ where: { event_id: eventId } })
-  if (!sub) {
-    sub = await prisma.eventSubscription.create({
-      data: {
-        event_id: eventId,
-        organization_id: evt.organization_id,
-        plan_code: 'free',
-        plan_name: freePlan.name,
-        price_snapshot_idr: 0,
-        limits_snapshot: buildPlanSnapshot(freePlan),
-        status: 'active',
-        is_trial: false
-      }
-    })
-  }
-
-  if (sub.is_trial && sub.trial_ends_at && new Date(sub.trial_ends_at).getTime() < Date.now()) {
-    sub = await prisma.eventSubscription.update({
-      where: { event_id: eventId },
-      data: {
-        status: 'trial_expired',
-        is_trial: false,
-        plan_code: 'free',
-        plan_name: freePlan.name,
-        limits_snapshot: buildPlanSnapshot(freePlan)
-      }
-    })
-    await recordBillingAudit({
-      organization_id: evt.organization_id,
-      event_id: eventId,
-      action: 'TRIAL_EXPIRED_TO_FREE',
-      from_plan: 'pro',
-      to_plan: 'free',
-      details: { preserved_data: true }
-    })
-  }
-
-  const [usage, trialLog] = await Promise.all([
-    getEventUsage(eventId),
-    prisma.billingAuditLog.findFirst({
-      where: {
-        action: 'TRIAL_ACTIVATED',
-        OR: [{ event_id: eventId }, { organization_id: evt.organization_id }]
-      }
-    })
-  ])
-
-  const daysRemaining =
-    sub.is_trial && sub.trial_ends_at
-      ? Math.max(0, Math.ceil((new Date(sub.trial_ends_at).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-      : null
-
+  const usage = await getEventUsage(eventId)
   return {
-    subscription: sub,
-    plan_code: sub.plan_code,
-    plan_name: sub.plan_name,
-    limits: sub.limits_snapshot || buildPlanSnapshot(freePlan),
-    allowed_modules: toArray(sub.limits_snapshot?.allowed_modules || freePlan.allowed_modules),
+    subscription: {
+      id: 'sub-' + eventId,
+      event_id: eventId,
+      organization_id: evt.organization_id,
+      plan_code: activePlan.code,
+      plan_name: activePlan.name,
+      price_snapshot_idr: SUBSCRIPTION_PRICE_IDR,
+      limits_snapshot: buildPlanSnapshot(activePlan),
+      status: 'active',
+      is_trial: false,
+      activated_at: new Date().toISOString()
+    },
+    plan_code: activePlan.code,
+    plan_name: activePlan.name,
+    limits: buildPlanSnapshot(activePlan),
+    allowed_modules: ALL_MODULES,
     usage,
     trial: {
-      is_trial: Boolean(sub.is_trial),
-      trial_started_at: sub.trial_started_at,
-      trial_ends_at: sub.trial_ends_at,
-      days_remaining: daysRemaining,
-      warning:
-        sub.is_trial && daysRemaining !== null && daysRemaining <= 3
-          ? `Masa Free Trial Pro berakhir dalam ${daysRemaining} hari. Upgrade paket agar fitur Pro tetap terbuka.`
-          : null,
-      eligible: !trialLog && sub.plan_code === 'free' && !sub.is_trial
+      is_trial: false,
+      trial_started_at: null,
+      trial_ends_at: null,
+      days_remaining: null,
+      warning: null,
+      eligible: false
     }
   }
 }
 
-export async function assertEventModuleAllowedByPlan(eventId, moduleKey) {
-  if (moduleKey === 'event_profile') return
-  const ent = await ensureEventEntitlement(eventId)
-  if (!ent.allowed_modules.includes(moduleKey)) {
-    throw new AppError(
-      `Modul "${moduleKey}" tidak termasuk dalam paket ${ent.plan_name}. Silakan aktifkan 14 Days Pro Trial atau upgrade paket event ini.`,
-      403,
-      'PLAN_UPGRADE_REQUIRED',
-      [{ required_module: moduleKey, current_plan: ent.plan_code }]
-    )
-  }
+export async function assertEventModuleAllowedByPlan(_eventId, _moduleKey) {
+  return
 }
 
-export async function assertEventQuotaAvailable(eventId, quotaType, incrementBy = 1) {
-  const ent = await ensureEventEntitlement(eventId)
-  const limits = ent.limits || {}
-
-  if (quotaType === 'participants') {
-    const max = Number(limits.max_participants || 100)
-    const next = ent.usage.participants_count + Number(incrementBy || 1)
-    if (next > max) {
-      throw new AppError(
-        `Kuota peserta paket ${ent.plan_name} telah mencapai batas maksimal (${max} peserta). Upgrade paket event untuk menampung lebih banyak peserta.`,
-        403,
-        'QUOTA_EXCEEDED',
-        [{ quota: 'participants', current: ent.usage.participants_count, max, plan: ent.plan_code }]
-      )
-    }
-  }
-
-  if (quotaType === 'team') {
-    const max = Number(limits.max_team_members || 3)
-    const next = ent.usage.team_members_count + Number(incrementBy || 1)
-    if (next > max) {
-      throw new AppError(
-        `Kuota tim/panitia paket ${ent.plan_name} sudah penuh (${max} anggota). Upgrade paket untuk menambah panitia.`,
-        403,
-        'QUOTA_EXCEEDED',
-        [{ quota: 'team_members', current: ent.usage.team_members_count, max, plan: ent.plan_code }]
-      )
-    }
-  }
+export async function assertEventQuotaAvailable(_eventId, _quotaType, _incrementBy = 1) {
+  return
 }
 
-export async function assertFreeEventCreationAllowed(organizationId) {
-  const freePlan = await getPlanByCode('free')
-  const maxFreeEvents = Number(freePlan?.max_active_events || 1)
-
-  if (!usePrisma()) {
-    const freeActiveCount = store.events.filter((e) => {
-      if (e.organization_id !== organizationId || e.deleted_at) return false
-      const sub = store.eventSubscriptions.find((s) => s.event_id === e.id)
-      return !sub || sub.plan_code === 'free'
-    }).length
-    if (freeActiveCount >= maxFreeEvents) {
-      // Allow creation, or if strict Free limit enforced cleanly check paid/credits
-      const hasCredits = store.bundleCredits.some((c) => c.organization_id === organizationId && c.remaining_credits > 0)
-      if (!hasCredits) {
-        return { warn_upgrade_needed: true, max_free_events: maxFreeEvents }
-      }
-    }
-    return { warn_upgrade_needed: false }
-  }
-
-  const orgEvents = await prisma.event.findMany({
-    where: { organization_id: organizationId, deleted_at: null },
-    include: { subscription: true }
-  })
-  const freeCount = orgEvents.filter((e) => !e.subscription || e.subscription.plan_code === 'free').length
-  if (freeCount >= maxFreeEvents) {
-    const credit = await prisma.organizationBundleCredit.findFirst({
-      where: { organization_id: organizationId, remaining_credits: { gt: 0 } }
-    })
-    if (!credit) {
-      return { warn_upgrade_needed: true, max_free_events: maxFreeEvents }
-    }
-  }
+export async function assertFreeEventCreationAllowed(_organizationId) {
   return { warn_upgrade_needed: false }
 }
 
-export async function activateEventTrial(eventId, user) {
-  const ent = await ensureEventEntitlement(eventId)
-  if (ent.subscription.plan_code !== 'free' || ent.trial.is_trial) {
-    throw new AppError('Event ini sudah menggunakan paket berbayar atau trial aktif.', 409, 'TRIAL_NOT_ELIGIBLE')
-  }
-  if (!ent.trial.eligible) {
-    throw new AppError(
-      'Program 14 Days Pro Access hanya dapat digunakan satu kali per organisasi/event agar tidak disalahgunakan.',
-      409,
-      'TRIAL_ALREADY_USED'
-    )
-  }
-
-  const proPlan = await getPlanByCode('pro')
-  if (!proPlan) throw new AppError('Konfigurasi paket Pro tidak ditemukan.', 404, 'PLAN_NOT_FOUND')
-
-  const trialDays = Math.max(1, Number(proPlan.trial_days || 14))
-  const startedAt = new Date()
-  const endsAt = new Date(startedAt.getTime() + trialDays * 24 * 60 * 60 * 1000)
-  const snapshot = buildPlanSnapshot(proPlan)
-
-  if (!usePrisma()) {
-    Object.assign(ent.subscription, {
-      plan_code: 'pro',
-      plan_name: `${proPlan.name} (Trial ${trialDays} Hari)`,
-      price_snapshot_idr: 0,
-      limits_snapshot: snapshot,
-      status: 'trialing',
-      is_trial: true,
-      trial_started_at: startedAt.toISOString(),
-      trial_ends_at: endsAt.toISOString(),
-      activated_at: startedAt.toISOString()
-    })
-    await recordBillingAudit({
-      organization_id: ent.subscription.organization_id,
-      event_id: eventId,
-      actor_id: user.id,
-      actor_role: user.role,
-      action: 'TRIAL_ACTIVATED',
-      from_plan: 'free',
-      to_plan: 'pro',
-      details: { trial_days: trialDays, ends_at: endsAt.toISOString() }
-    })
-    return ensureEventEntitlement(eventId)
-  }
-
-  await runTransaction(async (tx) => {
-    await tx.eventSubscription.update({
-      where: { event_id: eventId },
-      data: {
-        plan_code: 'pro',
-        plan_name: `${proPlan.name} (Trial ${trialDays} Hari)`,
-        price_snapshot_idr: 0,
-        limits_snapshot: snapshot,
-        status: 'trialing',
-        is_trial: true,
-        trial_started_at: startedAt,
-        trial_ends_at: endsAt,
-        activated_at: startedAt
-      }
-    })
-    await recordBillingAudit(
-      {
-        organization_id: ent.subscription.organization_id,
-        event_id: eventId,
-        actor_id: user.id,
-        actor_role: user.role,
-        action: 'TRIAL_ACTIVATED',
-        from_plan: 'free',
-        to_plan: 'pro',
-        details: { trial_days: trialDays, ends_at: endsAt.toISOString() }
-      },
-      tx
-    )
-    await tx.userNotification.create({
-      data: {
-        user_id: user.id,
-        user_role: 'organizer',
-        title: `14 Days Pro Access Aktif`,
-        message: `Trial Pro 14 hari aktif hingga ${endsAt.toLocaleDateString('id-ID')}. Semua modul siap digunakan tanpa biaya.`,
-        type: 'success',
-        reference_type: 'event',
-        reference_id: eventId
-      }
-    })
-  })
-
-  return ensureEventEntitlement(eventId)
+export async function activateEventTrial(_eventId, _user) {
+  throw new AppError(
+    'Program trial tidak tersedia. Gunakan langganan bulanan TERRA Studio Rp 50.000/bulan via Midtrans.',
+    400,
+    'TRIAL_DISABLED'
+  )
 }
 
-export async function previewBillingCheckout({
-  plan_code,
-  bundle_id = null,
-  event_id = null,
-  promo_code = '',
-  use_early_access = false,
-  is_community = false
-}) {
-  let targetPlan = null
-  let bundle = null
-  let basePrice = 0
-  let snapshot = {}
-
-  if (bundle_id) {
-    bundle = !usePrisma()
-      ? store.bundlePackages.find((b) => b.id === bundle_id || b.code === bundle_id)
-      : await prisma.bundlePackage.findFirst({ where: { OR: [{ id: bundle_id }, { code: bundle_id }] } })
-    if (!bundle || !bundle.is_active) throw new AppError('Paket bundle tidak ditemukan atau nonaktif.', 404, 'BUNDLE_NOT_FOUND')
-    targetPlan = await getPlanByCode(bundle.plan_code)
-    basePrice = Number(bundle.bundle_price_idr || 0)
-    snapshot = {
-      type: 'bundle',
-      bundle_code: bundle.code,
-      bundle_name: bundle.name,
-      event_quota: bundle.event_quota,
-      plan_code: bundle.plan_code,
-      limits: targetPlan ? buildPlanSnapshot(targetPlan) : {}
-    }
-  } else {
-    targetPlan = await getPlanByCode(plan_code)
-    if (!targetPlan || !targetPlan.is_active) throw new AppError('Paket harga tidak ditemukan.', 404, 'PLAN_NOT_FOUND')
-    basePrice = Number(targetPlan.price_idr || 0)
-    snapshot = buildPlanSnapshot(targetPlan)
-  }
-
-  let effectiveBase = basePrice
-  let earlyAccessSaved = 0
-  if (use_early_access && targetPlan && !bundle && targetPlan.early_access_price_idr != null) {
-    const now = Date.now()
-    const afterStart = !targetPlan.early_access_starts_at || new Date(targetPlan.early_access_starts_at).getTime() <= now
-    const beforeEnd = !targetPlan.early_access_ends_at || new Date(targetPlan.early_access_ends_at).getTime() >= now
-    if (afterStart && beforeEnd && targetPlan.early_access_price_idr < basePrice) {
-      earlyAccessSaved = basePrice - Number(targetPlan.early_access_price_idr)
-      effectiveBase = Number(targetPlan.early_access_price_idr)
-    }
-  }
-
-  let discountIdr = earlyAccessSaved
-  let appliedPromo = null
-  const cleanPromo = String(promo_code || '').trim().toUpperCase()
-  if (cleanPromo) {
-    const promo = !usePrisma()
-      ? store.promoCodes.find((p) => p.code.toUpperCase() === cleanPromo && p.is_active)
-      : await prisma.promoCode.findFirst({ where: { code: cleanPromo, is_active: true } })
-    if (!promo) throw new AppError(`Kode promo "${cleanPromo}" tidak ditemukan atau tidak aktif.`, 404, 'PROMO_NOT_FOUND')
-    const nowTs = Date.now()
-    if (promo.starts_at && new Date(promo.starts_at).getTime() > nowTs) {
-      throw new AppError(`Kode promo "${cleanPromo}" belum memasuki masa berlaku.`, 400, 'PROMO_NOT_STARTED')
-    }
-    if (promo.ends_at && new Date(promo.ends_at).getTime() < nowTs) {
-      throw new AppError(`Kode promo "${cleanPromo}" sudah kedaluwarsa.`, 400, 'PROMO_EXPIRED')
-    }
-    if (promo.max_redemptions && promo.used_count >= promo.max_redemptions) {
-      throw new AppError('Kuota penggunaan kode promo ini sudah habis.', 409, 'PROMO_EXHAUSTED')
-    }
-    if (promo.applies_to_plan && targetPlan && promo.applies_to_plan !== targetPlan.code) {
-      throw new AppError(`Kode promo ini hanya berlaku untuk paket ${promo.applies_to_plan.toUpperCase()}.`, 400, 'PROMO_PLAN_MISMATCH')
-    }
-    const extraDiscount =
-      promo.discount_type === 'percent'
-        ? Math.round((effectiveBase * Number(promo.discount_value || 0)) / 100)
-        : Math.min(effectiveBase, Number(promo.discount_value || 0))
-    discountIdr += extraDiscount
-    appliedPromo = { code: promo.code, name: promo.name, requires_verification: promo.requires_verification, saved: extraDiscount }
-  } else if (is_community && targetPlan && Number(targetPlan.community_discount_pct || 0) > 0) {
-    const commDiscount = Math.round((effectiveBase * Number(targetPlan.community_discount_pct)) / 100)
-    discountIdr += commDiscount
-    appliedPromo = { code: 'COMMUNITY', name: `Diskon Komunitas / BEM / UKM (${targetPlan.community_discount_pct}%)`, requires_verification: true, saved: commDiscount }
-  }
-
-  let upgradeCreditIdr = 0
-  let currentPlanCode = null
-  if (event_id && !bundle) {
-    const ent = await ensureEventEntitlement(event_id)
-    currentPlanCode = ent.plan_code
-    const paidSnapshot = Number(ent.subscription.price_snapshot_idr || 0)
-    if (!ent.trial.is_trial && paidSnapshot > 0 && (PLAN_RANK[targetPlan.code] || 0) > (PLAN_RANK[currentPlanCode] || 0)) {
-      upgradeCreditIdr = paidSnapshot
-    }
-  }
-
-  const finalAmountIdr = Math.max(0, basePrice - discountIdr - upgradeCreditIdr)
-
+export async function previewBillingCheckout(_params: any = {}) {
+  const snapshot = buildPlanSnapshot(SINGLE_MONTHLY_PLAN)
   return {
-    target_type: bundle ? 'bundle' : upgradeCreditIdr > 0 ? 'upgrade' : 'event_plan',
-    plan_code: targetPlan?.code || bundle?.plan_code,
-    plan_name: bundle ? bundle.name : targetPlan.name,
-    bundle_id: bundle?.id || null,
-    current_plan_code: currentPlanCode,
-    base_price_idr: basePrice,
-    discount_idr: discountIdr,
-    upgrade_credit_idr: upgradeCreditIdr,
-    final_amount_idr: finalAmountIdr,
-    applied_promo: appliedPromo,
-    early_access_saved_idr: earlyAccessSaved,
+    target_type: 'subscription',
+    plan_code: SINGLE_MONTHLY_PLAN.code,
+    plan_name: `${SINGLE_MONTHLY_PLAN.name} (1 Bulan)`,
+    bundle_id: null,
+    current_plan_code: null,
+    base_price_idr: SUBSCRIPTION_PRICE_IDR,
+    discount_idr: 0,
+    upgrade_credit_idr: 0,
+    final_amount_idr: SUBSCRIPTION_PRICE_IDR,
+    applied_promo: null,
+    early_access_saved_idr: 0,
     plan_snapshot: snapshot
   }
 }
 
-export async function createBillingCheckout(user, payload) {
+export async function createBillingCheckout(user, payload: any = {}) {
   const preview = await previewBillingCheckout(payload)
-  const orgId = payload.organization_id
-  if (!orgId) throw new AppError('Organisasi wajib dipilih.', 400, 'ORG_REQUIRED')
+  let orgId = payload.organization_id
+  if (!orgId) {
+    const dbMod = await import('./db.js')
+    const org = await dbMod.ensureOrganizerDefaultOrganization(user)
+    orgId = org.id
+  }
 
   const invoiceNumber = generateInvoiceNumber()
-  const isFree = preview.final_amount_idr === 0
-  const requiresManualVerify = Boolean(preview.applied_promo?.requires_verification)
-  const autoActivate = isFree && !requiresManualVerify
-  const txStatus = autoActivate ? 'Paid' : 'Pending'
-  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000)
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
   if (!usePrisma()) {
     const txRecord = {
@@ -588,30 +363,30 @@ export async function createBillingCheckout(user, payload) {
       organization_id: orgId,
       organizer_id: user.id,
       event_id: payload.event_id || null,
-      target_type: preview.target_type,
-      plan_code: preview.plan_code,
-      plan_name: preview.plan_name,
-      bundle_id: preview.bundle_id,
-      promo_code: payload.promo_code ? String(payload.promo_code).trim().toUpperCase() : null,
-      community_org_proof: payload.community_org_proof || null,
-      payment_method: isFree ? 'free' : payload.payment_method || 'payment_gateway',
-      payment_provider: isFree ? null : 'midtrans',
+      target_type: 'subscription',
+      plan_code: SINGLE_MONTHLY_PLAN.code,
+      plan_name: `${SINGLE_MONTHLY_PLAN.name} (1 Bulan)`,
+      bundle_id: null,
+      promo_code: null,
+      community_org_proof: null,
+      payment_method: 'payment_gateway',
+      payment_provider: 'midtrans',
       payment_token: null,
       payment_redirect_url: null,
       payment_reference: null,
       paid_at: null,
       payment_metadata: {},
-      base_price_idr: preview.base_price_idr,
-      discount_idr: preview.discount_idr,
-      upgrade_credit_idr: preview.upgrade_credit_idr,
-      final_amount_idr: preview.final_amount_idr,
+      base_price_idr: SUBSCRIPTION_PRICE_IDR,
+      discount_idr: 0,
+      upgrade_credit_idr: 0,
+      final_amount_idr: SUBSCRIPTION_PRICE_IDR,
       plan_snapshot: preview.plan_snapshot,
       payment_proof_url: null,
       payment_notes: payload.payment_notes || null,
       admin_notes: null,
       verified_by: null,
-      verified_at: autoActivate ? new Date().toISOString() : null,
-      status: txStatus,
+      verified_at: null,
+      status: 'Pending',
       expires_at: expiresAt.toISOString(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -622,19 +397,11 @@ export async function createBillingCheckout(user, payload) {
       event_id: payload.event_id || null,
       actor_id: user.id,
       actor_role: user.role,
-      action: 'CHECKOUT_CREATED',
-      from_plan: preview.current_plan_code,
-      to_plan: preview.plan_code,
-      details: { invoice_number: invoiceNumber, amount: preview.final_amount_idr, status: txStatus }
+      action: 'SUBSCRIPTION_CHECKOUT_CREATED',
+      to_plan: SINGLE_MONTHLY_PLAN.code,
+      details: { invoice_number: invoiceNumber, amount: SUBSCRIPTION_PRICE_IDR, status: 'Pending' }
     })
-    if (autoActivate) {
-      await verifyBillingTransactionInternal(txRecord.id, { id: 'system', role: 'admin' }, { status: 'Paid', admin_notes: 'Otomatis aktif (Rp 0).' })
-    }
-    return {
-      transaction: store.billingTransactions.find((t) => t.id === txRecord.id) || txRecord,
-      admin_whatsapp: env.adminWhatsappNumber || '6287897192601',
-      manual_payment_instructions: MANUAL_PAYMENT_INSTRUCTIONS
-    }
+    return { transaction: txRecord }
   }
 
   const created = await runTransaction(async (tx) => {
@@ -644,18 +411,15 @@ export async function createBillingCheckout(user, payload) {
         organization_id: orgId,
         organizer_id: user.id,
         event_id: payload.event_id || null,
-        target_type: preview.target_type,
-        plan_code: preview.plan_code,
-        plan_name: preview.plan_name,
-        bundle_id: preview.bundle_id,
-        promo_code: payload.promo_code ? String(payload.promo_code).trim().toUpperCase() : null,
-        community_org_proof: payload.community_org_proof || null,
-        payment_method: isFree ? 'free' : payload.payment_method || 'payment_gateway',
-        payment_provider: isFree ? null : 'midtrans',
-        base_price_idr: preview.base_price_idr,
-        discount_idr: preview.discount_idr,
-        upgrade_credit_idr: preview.upgrade_credit_idr,
-        final_amount_idr: preview.final_amount_idr,
+        target_type: 'subscription',
+        plan_code: SINGLE_MONTHLY_PLAN.code,
+        plan_name: `${SINGLE_MONTHLY_PLAN.name} (1 Bulan)`,
+        payment_method: 'payment_gateway',
+        payment_provider: 'midtrans',
+        base_price_idr: SUBSCRIPTION_PRICE_IDR,
+        discount_idr: 0,
+        upgrade_credit_idr: 0,
+        final_amount_idr: SUBSCRIPTION_PRICE_IDR,
         plan_snapshot: preview.plan_snapshot,
         payment_notes: payload.payment_notes || null,
         status: 'Pending',
@@ -668,30 +432,45 @@ export async function createBillingCheckout(user, payload) {
         event_id: payload.event_id || null,
         actor_id: user.id,
         actor_role: user.role,
-        action: 'CHECKOUT_CREATED',
-        from_plan: preview.current_plan_code,
-        to_plan: preview.plan_code,
-        details: { invoice_number: invoiceNumber, amount: preview.final_amount_idr }
+        action: 'SUBSCRIPTION_CHECKOUT_CREATED',
+        to_plan: SINGLE_MONTHLY_PLAN.code,
+        details: { invoice_number: invoiceNumber, amount: SUBSCRIPTION_PRICE_IDR }
       },
       tx
     )
     return rec
   })
 
-  if (autoActivate) {
-    const verified = await adminVerifyBillingTransaction(created.id, { id: user.id, role: 'admin' }, { status: 'Paid', admin_notes: 'Aktivasi otomatis (Rp 0).' })
-    return {
-      transaction: verified,
-      admin_whatsapp: env.adminWhatsappNumber || '6287897192601',
-      manual_payment_instructions: MANUAL_PAYMENT_INSTRUCTIONS
+  return { transaction: created }
+}
+
+export async function createOrReuseSubscriptionCheckout(user, { organization_id = null, force_new = false } = {}) {
+  const now = Date.now()
+  if (!force_new) {
+    if (!usePrisma()) {
+      const existingPending = store.billingTransactions.find(
+        (t) =>
+          t.organizer_id === user.id &&
+          t.status === 'Pending' &&
+          Number(t.final_amount_idr) === SUBSCRIPTION_PRICE_IDR &&
+          (!t.expires_at || new Date(t.expires_at).getTime() > now)
+      )
+      if (existingPending) return { transaction: existingPending, reused: true }
+    } else {
+      const existingPending = await prisma.billingTransaction.findFirst({
+        where: {
+          organizer_id: user.id,
+          status: 'Pending',
+          final_amount_idr: SUBSCRIPTION_PRICE_IDR,
+          expires_at: { gt: new Date() }
+        },
+        orderBy: { created_at: 'desc' }
+      })
+      if (existingPending) return { transaction: existingPending, reused: true }
     }
   }
 
-  return {
-    transaction: created,
-    admin_whatsapp: env.adminWhatsappNumber || '6287897192601',
-    manual_payment_instructions: MANUAL_PAYMENT_INSTRUCTIONS
-  }
+  return createBillingCheckout(user, { organization_id, payment_method: 'payment_gateway' })
 }
 
 export async function submitTransactionProof(txId, user, { payment_proof_url, payment_notes }) {
@@ -769,6 +548,8 @@ async function verifyBillingTransactionInternal(txId, adminUser, { status, admin
   tx.updated_at = tx.verified_at
 
   if (status === 'Paid') {
+    const dbMod = await import('./db.js')
+    await dbMod.activateOrganizerMonthlySubscription(tx.organizer_id, SUBSCRIPTION_DURATION_DAYS)
     if (tx.promo_code) {
       const p = store.promoCodes.find((x) => x.code.toUpperCase() === tx.promo_code.toUpperCase())
       if (p) p.used_count = Number(p.used_count || 0) + 1
@@ -848,6 +629,22 @@ export async function adminVerifyBillingTransaction(txId, adminUser, { status, a
     })
 
     if (status === 'Paid') {
+      const orgAccount = await txClient.organizer.findUnique({ where: { id: updated.organizer_id } })
+      if (orgAccount) {
+        const baseMs =
+          orgAccount.subscription_expires_at && new Date(orgAccount.subscription_expires_at).getTime() > Date.now()
+            ? new Date(orgAccount.subscription_expires_at).getTime()
+            : Date.now()
+        await txClient.organizer.update({
+          where: { id: orgAccount.id },
+          data: {
+            subscription_plan: SINGLE_MONTHLY_PLAN.code,
+            subscription_status: 'active',
+            subscription_expires_at: new Date(baseMs + SUBSCRIPTION_DURATION_DAYS * 24 * 60 * 60 * 1000)
+          }
+        })
+      }
+
       if (updated.promo_code) {
         await txClient.promoCode
           .updateMany({
@@ -1358,6 +1155,7 @@ export async function updateBillingPaymentSession(txId: string, patch: Record<st
     const tx = store.billingTransactions.find((t) => t.id === txId)
     if (!tx) throw new AppError('Transaksi billing tidak ditemukan.', 404, 'TX_NOT_FOUND')
     Object.assign(tx, {
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.payment_provider !== undefined ? { payment_provider: patch.payment_provider } : {}),
       ...(patch.payment_method !== undefined ? { payment_method: patch.payment_method } : {}),
       ...(patch.payment_token !== undefined ? { payment_token: patch.payment_token } : {}),
@@ -1381,6 +1179,7 @@ export async function updateBillingPaymentSession(txId: string, patch: Record<st
   return prisma.billingTransaction.update({
     where: { id: txId },
     data: {
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.payment_provider !== undefined ? { payment_provider: patch.payment_provider } : {}),
       ...(patch.payment_method !== undefined ? { payment_method: patch.payment_method } : {}),
       ...(patch.payment_token !== undefined ? { payment_token: patch.payment_token } : {}),

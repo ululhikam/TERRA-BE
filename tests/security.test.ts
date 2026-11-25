@@ -164,7 +164,10 @@ describe('TERRA Security & Business Rule Verification Suite', () => {
       email: 'other@kreatif.id',
       role: 'organizer',
       email_verified: true,
-      is_suspended: false
+      is_suspended: false,
+      subscription_plan: 'monthly_50k',
+      subscription_status: 'active',
+      subscription_expires_at: new Date(Date.now() + 30 * 86400000).toISOString()
     }
     store.users.push(org2User)
     const org2 = store.organizations.find((o) => o.id === 'org-2')

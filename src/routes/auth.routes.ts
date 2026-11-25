@@ -1,6 +1,11 @@
 import crypto from 'node:crypto'
 import { Router } from 'express'
-import passport, { isGoogleOAuthEnabled, signOAuthToken } from '../config/passport.js'
+import passport, {
+  decodeOAuthState,
+  encodeOAuthState,
+  isGoogleOAuthEnabled,
+  signOAuthToken
+} from '../config/passport.js'
 import { env } from '../config/env.js'
 import { requireAuth } from '../middleware/auth.middleware.js'
 import { validateBody } from '../middleware/validate.middleware.js'
@@ -88,39 +93,6 @@ function verifyOtpSessionToken(token) {
     return payload
   } catch {
     return null
-  }
-}
-
-function resolveFrontendOrigin(candidate) {
-  const allowed = [
-    env.frontendUrl,
-    ...env.corsOrigin.split(',').map((s) => s.trim().replace(/\/+$/, ''))
-  ].filter(Boolean)
-  if (!candidate) return env.frontendUrl
-  const cleaned = String(candidate).trim().replace(/\/+$/, '')
-  if (allowed.includes(cleaned)) return cleaned
-  if (cleaned.startsWith('http://localhost:') || cleaned.startsWith('http://127.0.0.1:')) {
-    return cleaned
-  }
-  return env.frontendUrl
-}
-
-function encodeOAuthState(obj) {
-  return Buffer.from(JSON.stringify(obj)).toString('base64url')
-}
-
-function decodeOAuthState(stateStr) {
-  try {
-    if (!stateStr) return { origin: env.frontendUrl, next: '/events' }
-    const parsed = JSON.parse(Buffer.from(String(stateStr), 'base64url').toString('utf8'))
-    return {
-      origin: resolveFrontendOrigin(parsed.origin),
-      next: typeof parsed.next === 'string' && parsed.next.startsWith('/') && !parsed.next.startsWith('//')
-        ? parsed.next
-        : '/events'
-    }
-  } catch {
-    return { origin: env.frontendUrl, next: '/events' }
   }
 }
 
@@ -323,23 +295,15 @@ router.post('/auth/register', validateBody(registerSchema), asyncHandler(async (
     otp_attempts: 0,
     ...(role === 'organizer'
       ? {
-          subscription_plan: 'free_trial',
-          subscription_status: 'trialing',
-          subscription_expires_at: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000)
+          subscription_plan: 'unsubscribed',
+          subscription_status: 'unpaid',
+          subscription_expires_at: null
         }
       : {})
   })
 
-  if (role === 'organizer' && organization_name.trim()) {
-    await db.createOrganization(
-      {
-        name: organization_name.trim(),
-        description: `Organisasi penyelenggara event ${organization_name.trim()}.`,
-        email,
-        website: 'https://terra.id'
-      },
-      syncedUser
-    )
+  if (role === 'organizer') {
+    await db.ensureOrganizerDefaultOrganization(syncedUser, organization_name)
   }
 
   const otpSessionToken = signOtpSessionToken(syncedUser)
@@ -627,7 +591,11 @@ router.post('/auth/reset-password', validateBody(resetPasswordSchema), asyncHand
 router.get('/auth/me', requireAuth, asyncHandler(async (req, res) => {
   const user = (await db.findUserByIdOrEmail(req.user.id, req.user.email, req.user.role)) || req.user
   const orgs = await db.listOrganizationsForUser(user)
-  return sendSuccess(res, { user: sanitizeUser(user), organizations: orgs }, 'Profil pengguna diambil.')
+  const safe = sanitizeUser(user)
+  if (safe?.role === 'organizer') {
+    safe.subscription.has_invited_event_access = await db.hasActiveOrganizerOrTeamAccess(user)
+  }
+  return sendSuccess(res, { user: safe, organizations: orgs }, 'Profil pengguna diambil.')
 }))
 
 router.post('/auth/profile', requireAuth, validateBody(profileUpdateSchema), asyncHandler(async (req, res) => {
@@ -659,21 +627,25 @@ router.get('/auth/oauth/status', (_req, res) => {
 })
 
 router.get('/auth/google', (req, res, next) => {
-  const origin = resolveFrontendOrigin(req.query.origin)
-  const nextPath =
-    typeof req.query.next === 'string' && req.query.next.startsWith('/') && !req.query.next.startsWith('//')
-      ? req.query.next
-      : '/events'
+  const role = req.query.role === 'organizer' ? 'organizer' : 'customer'
+  const organizationName = typeof req.query.organization_name === 'string' ? req.query.organization_name.trim() : ''
+  const state = encodeOAuthState({
+    origin: typeof req.query.origin === 'string' ? req.query.origin : undefined,
+    next: typeof req.query.next === 'string' ? req.query.next : role === 'organizer' ? '/dashboard/billing' : '/events',
+    role,
+    organization_name: organizationName
+  })
+  const decoded = decodeOAuthState(state)
+  const errorRedirectPath = role === 'organizer' ? '/organizer/login' : '/login'
 
   if (!isGoogleOAuthEnabled) {
     return res.redirect(
-      `${origin}/login?oauth_error=${encodeURIComponent(
+      `${decoded.origin}${errorRedirectPath}?oauth_error=${encodeURIComponent(
         'Google OAuth belum dikonfigurasi di .env backend (GOOGLE_CLIENT_ID & GOOGLE_CLIENT_SECRET).'
       )}`
     )
   }
 
-  const state = encodeOAuthState({ origin, next: nextPath })
   return passport.authenticate('google', {
     scope: ['profile', 'email'],
     session: false,
@@ -683,18 +655,19 @@ router.get('/auth/google', (req, res, next) => {
 })
 
 router.get('/auth/google/callback', (req, res, next) => {
-  const { origin, next: nextPath } = decodeOAuthState(req.query.state)
+  const { origin, next: nextPath, role } = decodeOAuthState(req.query.state)
+  const errorRedirectPath = role === 'organizer' ? '/organizer/login' : '/login'
 
   if (!isGoogleOAuthEnabled) {
     return res.redirect(
-      `${origin}/login?oauth_error=${encodeURIComponent('Google OAuth belum aktif di server.')}`
+      `${origin}${errorRedirectPath}?oauth_error=${encodeURIComponent('Google OAuth belum aktif di server.')}`
     )
   }
 
   return passport.authenticate('google', { session: false }, (err, user) => {
     if (err || !user) {
       const message = err?.message || 'Autentikasi Google dibatalkan atau gagal.'
-      return res.redirect(`${origin}/login?oauth_error=${encodeURIComponent(message)}`)
+      return res.redirect(`${origin}${errorRedirectPath}?oauth_error=${encodeURIComponent(message)}`)
     }
 
     const signedToken = signOAuthToken(user)
