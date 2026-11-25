@@ -155,7 +155,7 @@ router.get('/emails/:id/preview', optionalAuth, asyncHandler(async (req, res) =>
   res.removeHeader('X-Frame-Options')
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self' 'unsafe-inline'; img-src 'self' data: https:; frame-ancestors 'self' https://terra-concern.vercel.app https://*.vercel.app http://localhost:5173;"
+    "default-src 'self' 'unsafe-inline'; img-src 'self' data: https:; frame-ancestors 'self' https://terra.concern.web.id https://*.concern.web.id https://terra-concern.vercel.app https://*.vercel.app http://localhost:5173;"
   )
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   return res.status(200).send(email.html)

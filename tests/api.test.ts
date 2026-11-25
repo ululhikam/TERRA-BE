@@ -1185,4 +1185,46 @@ describe('TERRA Backend API v1 Integration Tests', () => {
       env.midtransClientKey = prevClientKey
     }
   })
+
+  it('serves dynamic XML sitemap, social share OG HTML, and accepts terra.concern.web.id CORS origin', async () => {
+    const eventsRes = await request('/marketplace/events')
+    assert.equal(eventsRes.status, 200)
+    const firstEvent = eventsRes.data.data[0]
+    assert.ok(firstEvent?.slug)
+
+    const sitemapRes = await request('/seo/sitemap.xml')
+    assert.equal(sitemapRes.status, 200)
+    assert.ok((sitemapRes.headers.get('content-type') || '').includes('application/xml'))
+    assert.ok(sitemapRes.data.includes('<loc>https://terra.concern.web.id/</loc>'))
+    assert.ok(sitemapRes.data.includes('<loc>https://terra.concern.web.id/events</loc>'))
+    assert.ok(
+      sitemapRes.data.includes(
+        `<loc>https://terra.concern.web.id/events/${encodeURIComponent(firstEvent.slug)}</loc>`
+      )
+    )
+
+    const shareEventRes = await request(`/seo/share/events/${encodeURIComponent(firstEvent.slug)}`)
+    assert.equal(shareEventRes.status, 200)
+    assert.ok((shareEventRes.headers.get('content-type') || '').includes('text/html'))
+    assert.ok(shareEventRes.data.includes('property="og:title"'))
+    assert.ok(shareEventRes.data.includes('property="og:image"'))
+    assert.ok(
+      shareEventRes.data.includes(
+        `https://terra.concern.web.id/events/${encodeURIComponent(firstEvent.slug)}`
+      )
+    )
+    assert.ok(shareEventRes.data.includes('"@type":"Event"'))
+
+    const shareOrgRes = await request('/seo/share/organizers/nusantara-tech')
+    assert.equal(shareOrgRes.status, 200)
+    assert.ok((shareOrgRes.headers.get('content-type') || '').includes('text/html'))
+    assert.ok(shareOrgRes.data.includes('property="og:title"'))
+    assert.ok(shareOrgRes.data.includes('"@type":"Organization"'))
+
+    const corsRes = await fetch(`${baseUrl}/health`, {
+      headers: { Origin: 'https://terra.concern.web.id' }
+    })
+    assert.equal(corsRes.status, 200)
+    assert.equal(corsRes.headers.get('access-control-allow-origin'), 'https://terra.concern.web.id')
+  })
 })

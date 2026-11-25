@@ -17,6 +17,7 @@ import adminRoutes from './admin.routes.js'
 import mediaRoutes from './media.routes.js'
 import pricingRoutes from './pricing.routes.js'
 import paymentRoutes from './payment.routes.js'
+import seoRoutes from './seo.routes.js'
 
 const router = Router()
 
@@ -48,5 +49,6 @@ router.use(adminRoutes)
 router.use(mediaRoutes)
 router.use(pricingRoutes)
 router.use(paymentRoutes)
+router.use(seoRoutes)
 
 export default router

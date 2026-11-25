@@ -20,12 +20,28 @@ function resolveAppBaseUrl(): string {
   return `http://localhost:${process.env.PORT || 3000}`
 }
 
+export const CANONICAL_SITE_URL = 'https://terra.concern.web.id'
+
+function resolveFrontendUrl(): string {
+  const explicit = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '')
+  if (explicit) {
+    if (/^https?:\/\/terra-concern\.vercel\.app$/i.test(explicit)) {
+      return CANONICAL_SITE_URL
+    }
+    return explicit
+  }
+  if (process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL)) {
+    return CANONICAL_SITE_URL
+  }
+  return 'http://localhost:5173'
+}
+
 export const env: EnvConfig = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   appBaseUrl: resolveAppBaseUrl(),
-  frontendUrl: (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, ''),
+  frontendUrl: resolveFrontendUrl(),
   qrSigningSecret: (process.env.QR_SIGNING_SECRET || 'terra-dev-qr-signing-secret-2026').trim(),
   supabaseUrl: process.env.SUPABASE_URL || '',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
