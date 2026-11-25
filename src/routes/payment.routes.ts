@@ -67,6 +67,19 @@ router.post(
 )
 
 // Midtrans Server-to-Server Webhook (Verified via SHA-512 signature_key)
+router.get('/payments/midtrans/webhook', (_req, res) => {
+  return sendSuccess(
+    res,
+    {
+      provider: 'midtrans',
+      method: 'POST',
+      status: 'ready',
+      webhook_path: '/api/v1/payments/midtrans/webhook'
+    },
+    'Endpoint webhook Midtrans aktif dan siap menerima notifikasi POST.'
+  )
+})
+
 router.post(
   '/payments/midtrans/webhook',
   asyncHandler(async (req, res) => {
