@@ -79,7 +79,7 @@ router.post('/events/:id/orders/:orderId/verify-payment', requireAuth, requireOr
 }))
 
 router.get('/orders/my', requireAuth, asyncHandler(async (req, res) => {
-  return sendSuccess(res, await db.listOrdersByCustomer(req.user.id))
+  return sendSuccess(res, await db.listOrdersByCustomer(req.user.id, req.user.email))
 }))
 
 router.get('/orders/:id', requireAuth, asyncHandler(async (req, res) => {
@@ -221,7 +221,7 @@ router.get('/orders/:id/tickets', requireAuth, asyncHandler(async (req, res) => 
 }))
 
 router.get('/tickets/my', requireAuth, asyncHandler(async (req, res) => {
-  return sendSuccess(res, await ticketingService.listMyTicketsWithQr(req.user.id))
+  return sendSuccess(res, await ticketingService.listMyTicketsWithQr(req.user.id, req.user.email))
 }))
 
 router.get('/tickets/:id', requireAuth, asyncHandler(async (req, res) => {

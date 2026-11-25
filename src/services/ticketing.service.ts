@@ -21,6 +21,12 @@ export async function assertOrderOrEventAccess(user, { customer_id = null, event
   if (!user) throw new AppError('Autentikasi diperlukan.', 401, 'UNAUTHORIZED')
   if (user.role === 'admin') return true
   if (customer_id && customer_id === user.id) return true
+  if (customer_id && user.email) {
+    const owner = await db.findUserById(customer_id, 'customer').catch(() => null)
+    if (owner?.email && owner.email.toLowerCase() === String(user.email).toLowerCase()) {
+      return true
+    }
+  }
   if (event_id) {
     const perms = await db.getUserEventPermissions(user, event_id)
     if (perms.includes('Manage Tickets') || perms.includes('View Participants') || perms.includes('Manage Check-in')) {
@@ -28,6 +34,23 @@ export async function assertOrderOrEventAccess(user, { customer_id = null, event
     }
   }
   throw new AppError('Anda tidak memiliki izin mengakses resource tiket/order ini.', 403, 'FORBIDDEN')
+}
+
+async function formatTicketForClient(ticket: any, event: any) {
+  if (!ticket) return ticket
+  const status = String(ticket.status || '').toLowerCase()
+  if (status === 'pending' || status === 'cancelled') {
+    return {
+      ...ticket,
+      qr_payload: null,
+      qr_token_hash: null,
+      qr_data_url: null,
+      qr_svg: null,
+      qr_image_url: null,
+      pdf_download_url: null
+    }
+  }
+  return attachTicketQr(ticket, event)
 }
 
 export async function assertOrderAccessById(orderId, user) {
@@ -50,7 +73,7 @@ export async function createOrderWithQrAndEmail({ event_id, ticket_type_id, quan
   })
 
   const evt = await db.getEventOrThrow(event_id)
-  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => attachTicketQr(t, evt)))
+  const ticketsWithQr = await Promise.all((result.tickets || []).map((t) => formatTicketForClient(t, evt)))
 
   let payment: any = {
     ...getPaymentConfigStatus(),
@@ -179,13 +202,14 @@ export async function listOrderTicketsWithQr(orderId, user = null) {
   if (user) await assertOrderAccessById(orderId, user)
   const tickets = await db.listTicketsByOrder(orderId)
   const eventMap = await loadEventMapForTickets(tickets)
-  return Promise.all(tickets.map((t) => attachTicketQr(t, eventMap.get(t.event_id) || null)))
+  return Promise.all(tickets.map((t) => formatTicketForClient(t, eventMap.get(t.event_id) || null)))
 }
 
-export async function listMyTicketsWithQr(userId) {
-  const tickets = await db.listTicketsByCustomer(userId)
-  const eventMap = await loadEventMapForTickets(tickets)
-  return Promise.all(tickets.map((t) => attachTicketQr(t, eventMap.get(t.event_id) || null)))
+export async function listMyTicketsWithQr(userId, userEmail = null) {
+  const tickets = await db.listTicketsByCustomer(userId, userEmail)
+  const issuedTickets = tickets.filter((t) => String(t.status || '').toLowerCase() !== 'pending')
+  const eventMap = await loadEventMapForTickets(issuedTickets)
+  return Promise.all(issuedTickets.map((t) => formatTicketForClient(t, eventMap.get(t.event_id) || null)))
 }
 
 async function resolveTicketWithOwnerAccess(ticketId, user) {
@@ -227,6 +251,9 @@ export async function getTicketQrAssets(ticketId, user = null) {
 
 export async function buildTicketQrImageDownload({ ticketId, token, user }) {
   const tk = await db.findTicketById(ticketId)
+  if (String(tk.status || '').toLowerCase() === 'pending') {
+    throw new AppError('Tiket belum dibayar. Selesaikan pembayaran terlebih dahulu untuk mengunduh QR.', 409, 'TICKET_PAYMENT_PENDING')
+  }
   const tokenValid = verifyQrDownloadToken(token, tk.id)
   if (!tokenValid) {
     if (!user) {
@@ -246,6 +273,9 @@ export async function buildTicketQrImageDownload({ ticketId, token, user }) {
 
 export async function buildTicketQrPdfDownload({ ticketId, token, user }) {
   const tk = await db.findTicketById(ticketId)
+  if (String(tk.status || '').toLowerCase() === 'pending') {
+    throw new AppError('Tiket belum dibayar. Selesaikan pembayaran terlebih dahulu untuk mengunduh PDF QR.', 409, 'TICKET_PAYMENT_PENDING')
+  }
   const tokenValid = verifyQrDownloadToken(token, tk.id)
   if (!tokenValid) {
     if (!user) {
@@ -285,6 +315,9 @@ export async function buildOrderQrPdfDownload({ orderId, token, user }) {
   const tickets = await db.listTicketsByOrder(order.id)
   if (!tickets.length) {
     throw new AppError('Tiket pada order ini tidak ditemukan.', 404, 'TICKET_NOT_FOUND')
+  }
+  if (order.order_status === 'Pending' || tickets.every((t) => String(t.status || '').toLowerCase() === 'pending')) {
+    throw new AppError('Order belum dibayar. Selesaikan pembayaran terlebih dahulu untuk mengunduh PDF QR.', 409, 'TICKET_PAYMENT_PENDING')
   }
 
   let event = null

@@ -1821,9 +1821,20 @@ export async function listOrdersByEvent(eventId) {
   return prisma.order.findMany({ where: { event_id: eventId }, orderBy: { created_at: 'desc' } })
 }
 
-export async function listOrdersByCustomer(customerId) {
+export async function listOrdersByCustomer(customerId, userEmail = null) {
   if (!usePrisma()) return store.orders.filter((o) => o.customer_id === customerId)
-  return prisma.order.findMany({ where: { customer_id: customerId }, orderBy: { created_at: 'desc' } })
+  const cleanEmail = String(userEmail || '').trim()
+  return prisma.order.findMany({
+    where: cleanEmail
+      ? {
+          OR: [
+            { customer_id: customerId },
+            { customer: { email: { equals: cleanEmail, mode: 'insensitive' } } }
+          ]
+        }
+      : { customer_id: customerId },
+    orderBy: { created_at: 'desc' }
+  })
 }
 
 export async function findOrderById(id) {
@@ -2519,13 +2530,23 @@ export async function listTicketsByOrder(orderId) {
   return prisma.ticket.findMany({ where: { order_id: orderId } })
 }
 
-export async function listTicketsByCustomer(customerId) {
+export async function listTicketsByCustomer(customerId, userEmail = null) {
   if (!usePrisma()) {
     const myOrderIds = new Set(store.orders.filter((o) => o.customer_id === customerId).map((o) => o.id))
     return store.tickets.filter((t) => myOrderIds.has(t.order_id))
   }
+  const cleanEmail = String(userEmail || '').trim()
   return prisma.ticket.findMany({
-    where: { order: { customer_id: customerId } },
+    where: cleanEmail
+      ? {
+          order: {
+            OR: [
+              { customer_id: customerId },
+              { customer: { email: { equals: cleanEmail, mode: 'insensitive' } } }
+            ]
+          }
+        }
+      : { order: { customer_id: customerId } },
     orderBy: { issued_at: 'desc' }
   })
 }
