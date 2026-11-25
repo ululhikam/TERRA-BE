@@ -493,12 +493,32 @@ export async function cancelBillingMidtransSession(txId: string, user: any) {
 }
 
 export async function processMidtransWebhook(payload: Record<string, any>) {
+  const midtransOrderId = String(payload?.order_id || '').trim()
+  const baseRef = extractBaseOrderReference(midtransOrderId)
+  const state = mapMidtransTransactionState(payload || {})
+  const incomingAmount = Math.round(Number(payload?.gross_amount || 0))
+
+  // Midtrans Dashboard "Test notification URL" sends a synthetic test payload (`payment_notif_test_*`)
+  // or URL-reachability ping that does not touch any real transaction and may use a dummy signature.
+  if (
+    !midtransOrderId ||
+    midtransOrderId.toLowerCase().startsWith('payment_notif_test') ||
+    midtransOrderId.toLowerCase().includes('notif_test')
+  ) {
+    console.info('[Midtrans Webhook Test/Ping Acknowledged]', {
+      order_id: midtransOrderId || 'ping',
+      transaction_status: payload?.transaction_status || 'test'
+    })
+    return {
+      target_type: 'test_notification',
+      reference: midtransOrderId || 'ping',
+      payment_state: state,
+      acknowledged: true
+    }
+  }
+
   verifyMidtransSignature(payload)
 
-  const midtransOrderId = String(payload.order_id || '').trim()
-  const baseRef = extractBaseOrderReference(midtransOrderId)
-  const state = mapMidtransTransactionState(payload)
-  const incomingAmount = Math.round(Number(payload.gross_amount || 0))
   console.info('[Midtrans Webhook]', {
     order_id: midtransOrderId,
     baseRef,
@@ -506,15 +526,6 @@ export async function processMidtransWebhook(payload: Record<string, any>) {
     state,
     incomingAmount
   })
-
-  if (midtransOrderId.toLowerCase().startsWith('payment_notif_test_')) {
-    return {
-      target_type: 'test_notification',
-      reference: midtransOrderId,
-      payment_state: state,
-      acknowledged: true
-    }
-  }
 
   // Route to BillingTransaction for INV-* invoices or Order for ORD-* / others
   if (baseRef.toUpperCase().startsWith('INV-')) {

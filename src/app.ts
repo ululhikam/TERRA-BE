@@ -40,6 +40,9 @@ app.use(
       if (/^https:\/\/(terra-concern|frontend-[a-z0-9-]+-concern2)\.vercel\.app$/i.test(normalized)) {
         return callback(null, true)
       }
+      if (/^https:\/\/([a-z0-9-]+\.)?midtrans\.com$/i.test(normalized)) {
+        return callback(null, true)
+      }
       return callback(new Error('Origin tidak diizinkan oleh CORS policy'))
     },
     credentials: true

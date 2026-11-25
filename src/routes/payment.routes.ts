@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { requireAuth } from '../middleware/auth.middleware.js'
 import { requireOrganizerOrAdmin } from '../middleware/role.middleware.js'
 import { getPaymentConfigStatus } from '../services/payment.service.js'
@@ -90,8 +90,19 @@ router.get('/payments/midtrans/webhook', (_req, res) => {
 
 router.post(
   '/payments/midtrans/webhook',
+  express.text({ type: 'text/*' }),
   asyncHandler(async (req, res) => {
-    const result = await paymentOrchestrator.processMidtransWebhook(req.body || {})
+    let payload: Record<string, any> = {}
+    if (typeof req.body === 'string' && req.body.trim()) {
+      try {
+        payload = JSON.parse(req.body)
+      } catch {
+        payload = {}
+      }
+    } else if (req.body && typeof req.body === 'object') {
+      payload = req.body
+    }
+    const result = await paymentOrchestrator.processMidtransWebhook(payload)
     return sendSuccess(res, result, 'Webhook Midtrans diproses.')
   })
 )
