@@ -966,11 +966,11 @@ export async function getEnrichedEvent(eventId, user = null) {
 
 export async function createEvent(data, user) {
   const slug = data.slug || slugify(data.title) + '-' + Math.floor(100 + Math.random() * 900)
-  // Default new events start on FREE plan (event_profile, timeline, team active; paid modules locked until Trial/Upgrade)
-  const freePlan = await pricingDb.getPlanByCode('free')
-  const defaultModules = Array.isArray(freePlan?.allowed_modules) && freePlan.allowed_modules.length
-    ? [...freePlan.allowed_modules]
-    : ['event_profile', 'timeline', 'team']
+  // Subscribed organizers unlock all 13 modules (including ticketing, check_in, finance) on newly created events
+  const activePlan = await pricingDb.getPlanByCode('monthly_50k').catch(() => null)
+  const defaultModules = Array.isArray(activePlan?.allowed_modules) && activePlan.allowed_modules.length
+    ? [...activePlan.allowed_modules]
+    : [...pricingDb.ALL_MODULES]
   if (!usePrisma()) {
     const evt = {
       id: 'evt-' + Date.now(),
